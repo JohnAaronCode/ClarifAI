@@ -2,12 +2,56 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const { content, type } = await request.json()
+    const { content, type, fileName } = await request.json()
     if (!content) {
       return NextResponse.json({ error: "No content provided" }, { status: 400 })
     }
 
-    const validationResult = validateContent(content, type)
+    let processedContent = content
+
+    if (type === "url") {
+      try {
+        console.log("[v0] Fetching URL:", content)
+        const response = await fetch(content, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!response.ok) {
+          return NextResponse.json({
+            verdict: "ERROR",
+            confidence_score: 0,
+            explanation: `Unable to fetch URL. Status: ${response.status}. Please check if the URL is accessible.`,
+          })
+        }
+        const html = await response.text()
+        processedContent = extractTextFromHTML(html)
+        console.log("[v0] Extracted URL content length:", processedContent.length)
+
+        if (processedContent.length < 30) {
+          return NextResponse.json({
+            verdict: "ERROR",
+            confidence_score: 0,
+            explanation: "URL content is too short or empty. Please check if the URL contains an article.",
+          })
+        }
+      } catch (error) {
+        console.error("[v0] Error fetching URL:", error)
+        return NextResponse.json({
+          verdict: "ERROR",
+          confidence_score: 0,
+          explanation: "Failed to fetch URL. Please check if the URL is valid and accessible.",
+        })
+      }
+    }
+
+    if (type === "file" && content.startsWith("[")) {
+      processedContent =
+        "File uploaded: " + content + ". Please provide file content or use URL/text input for analysis."
+    }
+
+    const validationResult = validateContent(processedContent, type)
     if (!validationResult.isValid) {
       return NextResponse.json({
         verdict: "ERROR",
@@ -16,7 +60,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const analysis = await analyzeContent(content, type)
+    const analysis = await analyzeContent(processedContent, type, fileName)
     return NextResponse.json(analysis)
   } catch (error) {
     console.error("Analysis error:", error)
@@ -24,34 +68,48 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function extractTextFromHTML(html: string): string {
+  const text = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  return text
+}
+
 function validateContent(content: string, type: string): { isValid: boolean; message: string } {
   const trimmed = content.trim()
-  const isURL = trimmed.startsWith("http://") || trimmed.startsWith("https://")
   const hasLetters = /[a-zA-Z]/.test(trimmed)
 
-  if (type === "text" && isURL) {
-    return { isValid: false, message: "Please enter a valid news article or statement." }
+  if (trimmed.length < 30) {
+    return { isValid: false, message: "Content is too short. Please provide more text." }
   }
 
-  if (type === "url" && !isURL) {
-    return { isValid: false, message: "Please enter a valid URL." }
-  }
-
-  if (trimmed.length < 50 || !hasLetters) {
-    return { isValid: false, message: "The input does not contain valid or meaningful news content." }
+  if (!hasLetters) {
+    return { isValid: false, message: "Content must contain text. Please provide a valid article or document." }
   }
 
   const wordCount = trimmed.split(/\s+/).length
-  const mostlySymbols = trimmed.replace(/[a-zA-Z0-9\s]/g, "").length / trimmed.length > 0.3
-  const hasSentenceStructure = /[A-Z][a-z]+\s+[A-Z][a-z]+/.test(trimmed)
-  if (wordCount < 5 || mostlySymbols || !hasSentenceStructure) {
-    return { isValid: false, message: "Please provide well-structured and meaningful news content." }
+  if (wordCount < 5) {
+    return {
+      isValid: false,
+      message: "Content has too few words. Please provide at least 5 words of meaningful content.",
+    }
   }
 
   return { isValid: true, message: "" }
 }
 
-async function analyzeContent(content: string, type: string) {
+async function analyzeContent(content: string, type: string, fileName?: string) {
   const entities = extractEntitiesAdvanced(content)
   const claims = extractMainClaims(content)
   const sentimentAnalysis = analyzeSentiment(content)
@@ -180,6 +238,7 @@ async function analyzeContent(content: string, type: string) {
     credibility_indicators: credibilityPatterns,
     fact_check_results: factChecks,
     clickbait_score: clickbaitScore,
+    file_name: fileName,
   }
 }
 
@@ -265,16 +324,9 @@ function detectClickbait(text: string): number {
       "mind-blowing",
       "absolutely",
       "stunning",
+      "astonishing",
     ],
-    vague: [
-      "doctors hate this",
-      "one trick",
-      "this one secret",
-      "health experts hate",
-      "he did what",
-      "you won't guess",
-      "celebrities don't want",
-    ],
+    vague: ["they say", "people claim", "sources say", "officials say", "health experts say", "celebrities say"],
   }
 
   const lowerText = text.toLowerCase()
@@ -429,7 +481,6 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
   const results: any[] = []
 
   try {
-    // Google Fact Check API
     if (googleApiKey) {
       try {
         const url = `https://factchecktools.googleapis.com/v1alpha1/claims:search?query=${encodeURIComponent(mainClaim)}&key=${googleApiKey}`
@@ -452,7 +503,6 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
       }
     }
 
-    // NewsAPI for recent articles
     if (newsApiKey && results.length < 2) {
       try {
         const keywords = mainClaim.split(/\s+/).slice(0, 6).join(" ")
@@ -476,7 +526,6 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
       }
     }
 
-    // Hugging Face fallback for AI-generated content detection
     if (results.length === 0 && hfApiKey) {
       try {
         const hfRes = await fetch("https://api-inference.huggingface.co/models/roberta-base-openai-detector", {

@@ -2,15 +2,19 @@
 
 import type React from "react"
 import { useState } from "react"
+import * as mammoth from "mammoth"
+import * as pdfjsLib from "pdfjs-dist"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Upload, Loader2, X } from "lucide-react"
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+
 interface DetectorFormProps {
-  onAnalyze: (content: string, type: "text" | "url" | "file") => void
-  onClearResult: () => void  // ✅ new prop to clear results when deleting input
+  onAnalyze: (content: string, type: "text" | "url" | "file", fileName?: string) => void
+  onClearResult: () => void
   loading: boolean
 }
 
@@ -30,29 +34,80 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   }
 
   const handleFileSubmit = () => {
-    if (fileContent.trim()) onAnalyze(fileContent, "file")
+    if (fileContent.trim()) onAnalyze(fileContent, "file", fileName)
   }
 
-  // --- When typing in one input, clear the other ---
   const handleArticleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setArticleText(e.target.value)
-    if (urlInput) setUrlInput("") // clear URL field
-    if (e.target.value.trim() === "") onClearResult() // clear results if input cleared
+    if (urlInput) setUrlInput("")
+    if (e.target.value.trim() === "") onClearResult()
   }
 
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setUrlInput(e.target.value)
-    if (articleText) setArticleText("") // clear article content
-    if (e.target.value.trim() === "") onClearResult() // clear results if input cleared
+    if (articleText) setArticleText("")
+    if (e.target.value.trim() === "") onClearResult()
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const text = await file.text()
-    setFileContent(text)
-    setFileName(file.name)
+    try {
+      let text = ""
+
+      if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        text = await extractPdfText(file)
+      } else if (
+        file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        file.name.endsWith(".docx")
+      ) {
+        text = await extractDocxText(file)
+      } else if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+        text = await file.text()
+      } else {
+        text = await file.text()
+      }
+
+      console.log("[v0] File loaded - name:", file.name, "extracted text length:", text.length)
+      setFileContent(text)
+      setFileName(file.name)
+    } catch (error) {
+      console.error("Error reading file:", error)
+      setFileContent("[Error reading file - please try another file]")
+      setFileName(file.name)
+    }
+  }
+
+  async function extractDocxText(file: File): Promise<string> {
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const result = await mammoth.extractRawText({ arrayBuffer })
+      return result.value || "No text found in DOCX file"
+    } catch (err) {
+      console.error("DOCX parsing error:", err)
+      throw new Error("Failed to parse DOCX file")
+    }
+  }
+
+  async function extractPdfText(file: File): Promise<string> {
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+      let text = ""
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const textContent = await page.getTextContent()
+        const pageText = textContent.items.map((item: any) => item.str).join(" ")
+        text += pageText + " "
+      }
+
+      return text.trim() || "No text found in PDF file"
+    } catch (err) {
+      console.error("PDF parsing error:", err)
+      throw new Error("Failed to parse PDF file")
+    }
   }
 
   const handleChangeFile = () => {
@@ -60,10 +115,9 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
     setFileName("")
     const fileInput = document.getElementById("file-upload") as HTMLInputElement
     if (fileInput) fileInput.value = ""
-    onClearResult() // ✅ clear result when removing file
+    onClearResult()
   }
 
-  // --- NEW: Clear buttons for text & URL ---
   const handleClearArticle = () => {
     setArticleText("")
     onClearResult()
@@ -83,7 +137,6 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           <TabsTrigger value="file">Upload File</TabsTrigger>
         </TabsList>
 
-        {/* --- ARTICLE TAB --- */}
         <TabsContent value="article" className="space-y-4">
           <div className="relative">
             <Textarea
@@ -118,12 +171,11 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           </Button>
         </TabsContent>
 
-        {/* --- URL TAB --- */}
         <TabsContent value="url" className="space-y-4">
           <div className="relative">
             <Input
               type="url"
-              placeholder="Enter news article URL..."
+              placeholder="Enter news article URL"
               value={urlInput}
               onChange={handleUrlChange}
               className="pr-10"
@@ -154,9 +206,8 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           </Button>
         </TabsContent>
 
-        {/* --- FILE TAB (unchanged except for onClearResult call) --- */}
         <TabsContent value="file" className="space-y-4">
-          {!fileContent ? (
+          {!fileName ? (
             <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/50 transition-colors">
               <input
                 type="file"
@@ -169,25 +220,20 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
                 <Upload className="w-8 h-8 mx-auto text-muted-foreground" />
                 <div>
                   <p className="font-semibold">Upload a file</p>
-                  <p className="text-sm text-muted-foreground">TXT, PDF, or DOCX</p>
+                  <p className="text-sm text-muted-foreground">TXT, DOCX, or PDF</p>
                 </div>
               </label>
             </div>
           ) : (
-            <div className="border rounded-lg p-4 bg-muted/30 space-y-3 dark:bg-slate-800 dark:border-slate-700">
-              <div className="flex items-start justify-between">
+            <div className="border rounded-lg p-4 bg-muted/30 dark:bg-slate-800 dark:border-slate-700">
+              <div className="flex items-center justify-between">
                 <div>
                   <p className="font-semibold text-sm">File Loaded</p>
-                  <p className="text-sm text-muted-foreground">{fileName}</p>
-                  <p className="text-xs text-muted-foreground mt-1">{fileContent.length} characters</p>
+                  <p className="text-sm text-blue-600 font-medium">{fileName}</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={handleChangeFile}>
                   Change File
                 </Button>
-              </div>
-              <div className="bg-background dark:bg-slate-900 p-3 rounded max-h-40 overflow-y-auto text-xs whitespace-pre-wrap break-words border dark:border-slate-700 text-foreground dark:text-slate-100">
-                {fileContent.substring(0, 300)}
-                {fileContent.length > 300 && "..."}
               </div>
             </div>
           )}

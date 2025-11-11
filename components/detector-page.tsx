@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
-import Navbar from "./navbar"
-import DetectorForm from "./detector-form"
-import ResultsDisplay from "./results-display"
+import Navbar from "@/components/navbar"
+import DetectorForm from "@/components/detector-form"
+import ResultsDisplay from "@/components/results-display"
 
 interface AnalysisResult {
   verdict: "REAL" | "FAKE" | "UNVERIFIED" | "ERROR"
@@ -21,6 +21,7 @@ interface HistoryItem {
   id: string
   input_type: "text" | "url" | "file"
   content_preview: string
+  fileName?: string
   verdict: "REAL" | "FAKE" | "UNVERIFIED"
   confidence_score: number
   explanation: string
@@ -37,7 +38,7 @@ export default function DetectorPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [inputContent, setInputContent] = useState("")
 
-  const handleAnalyze = async (content: string, type: "text" | "url" | "file") => {
+  const handleAnalyze = async (content: string, type: "text" | "url" | "file", fileName?: string) => {
     setLoading(true)
     setInputContent(content)
 
@@ -45,7 +46,7 @@ export default function DetectorPage() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, type }),
+        body: JSON.stringify({ content, type, fileName }),
       })
 
       const data = await response.json()
@@ -56,7 +57,8 @@ export default function DetectorPage() {
         const newEntry: HistoryItem = {
           id: Date.now().toString(),
           input_type: type,
-          content_preview: content.substring(0, 200),
+          content_preview: type === "file" ? fileName || "File" : content.substring(0, 200),
+          fileName: fileName,
           verdict: data.verdict,
           confidence_score: data.confidence_score,
           explanation: data.explanation,
@@ -101,14 +103,10 @@ export default function DetectorPage() {
             <Card className="p-6">
               <h2 className="text-2xl font-semibold mb-2">Verify News Content</h2>
               <p className="text-muted-foreground mb-6">
-                Enter a news article, link, or upload a file to check if it’s real or fake
+                Enter a news article, link, or upload a file to check if it's real or fake
               </p>
 
-              <DetectorForm
-                onAnalyze={handleAnalyze}
-                onClearResult={() => setResult(null)} // ✅ clear results when input cleared
-                loading={loading}
-              />
+              <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
             </Card>
 
             {result && <ResultsDisplay result={result} inputContent={inputContent} />}
@@ -134,7 +132,6 @@ function HistoryTab() {
         const savedHistory = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
         setHistory(savedHistory)
 
-        // Calculate statistics
         if (savedHistory && savedHistory.length > 0) {
           const real = savedHistory.filter((d: HistoryItem) => d.verdict === "REAL").length
           const fake = savedHistory.filter((d: HistoryItem) => d.verdict === "FAKE").length
@@ -223,7 +220,9 @@ function HistoryTab() {
           <Card key={item.id} className="p-4 hover:bg-muted/50 transition-colors">
             <div className="flex items-start justify-between">
               <div className="flex-1">
-                <p className="font-semibold line-clamp-2">{item.content_preview}</p>
+                <p className="font-semibold line-clamp-2">
+                  {item.input_type === "file" ? `📄 ${item.fileName || "File"}` : item.content_preview}
+                </p>
                 <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
                   <span>{new Date(item.created_at).toLocaleDateString()}</span>
                   <span>{item.input_type.toUpperCase()}</span>
