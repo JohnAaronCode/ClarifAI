@@ -2,15 +2,11 @@
 
 import type React from "react"
 import { useState } from "react"
-import * as mammoth from "mammoth"
-import * as pdfjsLib from "pdfjs-dist"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Upload, Loader2, X } from "lucide-react"
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
 interface DetectorFormProps {
   onAnalyze: (content: string, type: "text" | "url" | "file", fileName?: string) => void
@@ -81,6 +77,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
 
   async function extractDocxText(file: File): Promise<string> {
     try {
+      const mammoth = await import("mammoth")
       const arrayBuffer = await file.arrayBuffer()
       const result = await mammoth.extractRawText({ arrayBuffer })
       return result.value || "No text found in DOCX file"
@@ -92,6 +89,9 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
 
   async function extractPdfText(file: File): Promise<string> {
     try {
+      const pdfjsLib = await import("pdfjs-dist")
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
       let text = ""
@@ -175,7 +175,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           <div className="relative">
             <Input
               type="url"
-              placeholder="Enter news article URL"
+              placeholder="Enter news article URL (e.g., https://rappler.com/article)..."
               value={urlInput}
               onChange={handleUrlChange}
               className="pr-10"
@@ -190,6 +190,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
               </button>
             )}
           </div>
+          <p className="text-xs text-muted-foreground">We'll fetch and analyze the article content from the URL</p>
           <Button
             onClick={handleUrlSubmit}
             disabled={loading || !urlInput.trim()}
@@ -207,7 +208,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
         </TabsContent>
 
         <TabsContent value="file" className="space-y-4">
-          {!fileName ? (
+          {!fileContent ? (
             <div className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/50 transition-colors">
               <input
                 type="file"
