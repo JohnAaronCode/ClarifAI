@@ -76,6 +76,10 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   }
 
   async function extractDocxText(file: File): Promise<string> {
+    if (typeof window === "undefined") {
+      throw new Error("Cannot process DOCX files on the server")
+    }
+
     try {
       const mammoth = await import("mammoth")
       const arrayBuffer = await file.arrayBuffer()
@@ -88,9 +92,16 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   }
 
   async function extractPdfText(file: File): Promise<string> {
+    if (typeof window === "undefined") {
+      throw new Error("Cannot process PDF files on the server")
+    }
+
     try {
       const pdfjsLib = await import("pdfjs-dist")
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+
+      if (typeof window !== "undefined") {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+      }
 
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
