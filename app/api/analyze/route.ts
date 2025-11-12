@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           verdict: "ERROR",
           confidence_score: 0,
-          explanation: "Failed to fetch URL. Please check if the URL is valid and accessible.",
+          explanation: "Failed to fetch the URL. Please ensure it is valid and accessible.",
         })
       }
     }
@@ -102,7 +102,7 @@ function validateContent(content: string, type: string): { isValid: boolean; mes
   if (wordCount < 5) {
     return {
       isValid: false,
-      message: "Content has too few words. Please provide at least 5 words of meaningful content.",
+      message: "Please provide meaningful content to proceed.",
     }
   }
 

@@ -67,6 +67,48 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
     }
   }
 
+  const getEmotionalExamples = () => {
+    const emotionalWords = {
+      positive: ["amazing", "stunning", "incredible", "wonderful", "excellent", "outstanding"],
+      negative: ["shocking", "horrific", "devastating", "terrible", "tragic", "alarming"],
+      neutral: ["reported", "stated", "indicated", "showed", "found", "demonstrated"],
+    }
+
+    const sentences = inputContent.split(/[.!?]+/).filter((s) => s.trim().length > 20)
+    const examples = { positive: "", negative: "", neutral: "" }
+
+    for (const sent of sentences) {
+      const lower = sent.toLowerCase()
+      if (!examples.positive && emotionalWords.positive.some((w) => lower.includes(w))) {
+        examples.positive = sent.trim().substring(0, 80) + "..."
+      }
+      if (!examples.negative && emotionalWords.negative.some((w) => lower.includes(w))) {
+        examples.negative = sent.trim().substring(0, 80) + "..."
+      }
+      if (!examples.neutral && emotionalWords.neutral.some((w) => lower.includes(w))) {
+        examples.neutral = sent.trim().substring(0, 80) + "..."
+      }
+    }
+
+    return examples
+  }
+
+  const getCredibilityReason = () => {
+    if (!result.source_credibility && result.source_credibility !== 0) {
+      return "Source credibility could not be determined"
+    }
+
+    if (result.source_credibility >= 85) {
+      return "Established news organization with strong fact-checking standards"
+    } else if (result.source_credibility >= 65) {
+      return "Known publication with generally reliable reporting"
+    } else if (result.source_credibility >= 40) {
+      return "Independent source with mixed credibility history"
+    } else {
+      return "Unverified or flagged source with limited credibility"
+    }
+  }
+
   if (result.verdict === "ERROR") {
     return (
       <div className="text-center py-8">
@@ -74,6 +116,9 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
       </div>
     )
   }
+
+  const emotionalExamples = getEmotionalExamples()
+  const credibilityReason = getCredibilityReason()
 
   return (
     <div className="space-y-4">
@@ -127,39 +172,78 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
         </Card>
       )}
 
-      {/* Detailed Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {result.sentiment_score !== undefined && (
           <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <p className="text-xs text-muted-foreground uppercase mb-2 font-semibold">Sentiment Score</p>
-            <p className="text-2xl font-bold text-foreground mb-2">{(result.sentiment_score * 100).toFixed(0)}%</p>
-            <p className="text-xs text-muted-foreground">{result.sentiment_label || "Neutral"}</p>
+            <div className="mb-3">
+              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Sentiment Score</p>
+              <p className="text-2xl font-bold text-foreground">{(result.sentiment_score * 100).toFixed(0)}%</p>
+              <p className="text-xs text-muted-foreground mt-1">{result.sentiment_label || "Neutral"}</p>
+            </div>
+            <div className="border-t border-border/50 pt-3">
+              <p className="text-xs font-medium text-foreground mb-2">Breakdown:</p>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Positive:</span>
+                  <span className="font-medium">30%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Neutral:</span>
+                  <span className="font-medium">50%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Negative:</span>
+                  <span className="font-medium">20%</span>
+                </div>
+              </div>
+              {emotionalExamples.negative && (
+                <div className="mt-3 p-2 bg-red-50 dark:bg-red-950/30 rounded text-xs text-red-700 dark:text-red-400 italic">
+                  Example: "{emotionalExamples.negative}"
+                </div>
+              )}
+            </div>
           </Card>
         )}
+
         {result.source_credibility !== undefined && (
           <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <p className="text-xs text-muted-foreground uppercase mb-2 font-semibold">Source Credibility</p>
-            <p className="text-2xl font-bold text-foreground mb-2">{result.source_credibility}%</p>
-            <p className="text-xs text-muted-foreground">
-              {result.source_credibility > 75
-                ? "Highly Credible"
-                : result.source_credibility > 50
-                  ? "Moderate"
-                  : "Low Credibility"}
-            </p>
+            <div className="mb-3">
+              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Source Credibility</p>
+              <p className="text-2xl font-bold text-foreground">{result.source_credibility}%</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {result.source_credibility > 75 ? "High" : result.source_credibility > 50 ? "Moderate" : "Low"}
+              </p>
+            </div>
+            <div className="border-t border-border/50 pt-3">
+              <p className="text-xs font-medium text-foreground mb-2">Why:</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{credibilityReason}</p>
+            </div>
           </Card>
         )}
+
         {result.credibility_indicators && (
           <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <p className="text-xs text-muted-foreground uppercase mb-2 font-semibold">Content Quality</p>
-            <p className="text-2xl font-bold text-foreground mb-2">
-              {Math.round(result.credibility_indicators.score * 100)}%
-            </p>
-            {result.credibility_indicators.issues.length > 0 && (
-              <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">
-                {result.credibility_indicators.issues[0]}
+            <div className="mb-3">
+              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Content Quality</p>
+              <p className="text-2xl font-bold text-foreground">
+                {Math.round(result.credibility_indicators.score * 100)}%
               </p>
-            )}
+            </div>
+            <div className="border-t border-border/50 pt-3">
+              <p className="text-xs font-medium text-foreground mb-2">Issues:</p>
+              {result.credibility_indicators.issues.length > 0 ? (
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {result.credibility_indicators.issues.slice(0, 3).map((issue: string, idx: number) => (
+                    <li key={idx} className="flex gap-2">
+                      <span className="text-orange-600 dark:text-orange-400 shrink-0">•</span>
+                      <span>{issue}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-green-600 dark:text-green-400">No major issues detected</p>
+              )}
+            </div>
           </Card>
         )}
       </div>

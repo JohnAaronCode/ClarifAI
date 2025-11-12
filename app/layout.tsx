@@ -7,9 +7,12 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "ClarifiAI - Fake News Detector",
-  description: "Detect fake news in real-time with AI-powered analysis",
+  title: "ClarifAI | Fake News Detector",
+  description: "Don't guess the news, ClarifAI it!",
   generator: "v0.app",
+  icons: {
+    icon: "/logo.svg",
+  },
 }
 
 export default function RootLayout({

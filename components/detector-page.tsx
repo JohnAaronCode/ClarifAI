@@ -125,6 +125,8 @@ function HistoryTab() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [stats, setStats] = useState({ total: 0, real: 0, fake: 0, unverified: 0, avgConfidence: 0 })
   const [loading, setLoading] = useState(true)
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [selectAll, setSelectAll] = useState(false)
 
   useEffect(() => {
     const fetchHistory = () => {
@@ -132,7 +134,7 @@ function HistoryTab() {
         const savedHistory = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
         setHistory(savedHistory)
 
-        if (savedHistory && savedHistory.length > 0) {
+        if (savedHistory.length > 0) {
           const real = savedHistory.filter((d: HistoryItem) => d.verdict === "REAL").length
           const fake = savedHistory.filter((d: HistoryItem) => d.verdict === "FAKE").length
           const unverified = savedHistory.filter((d: HistoryItem) => d.verdict === "UNVERIFIED").length
@@ -157,12 +159,45 @@ function HistoryTab() {
     fetchHistory()
   }, [])
 
-  const handleClearAll = () => {
-    if (confirm("Are you sure you want to clear all history?")) {
-      localStorage.setItem("analysisHistory", "[]")
-      setHistory([])
-      setStats({ total: 0, real: 0, fake: 0, unverified: 0, avgConfidence: 0 })
+  const handleSelect = (id: string) => {
+    setSelectedItems((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedItems([])
+      setSelectAll(false)
+    } else {
+      setSelectedItems(history.map((item) => item.id))
+      setSelectAll(true)
     }
+  }
+
+  const handleDeleteSelected = () => {
+    if (selectedItems.length === 0) {
+      alert("Please select at least one item to delete.")
+      return
+    }
+
+    const updatedHistory = history.filter((item) => !selectedItems.includes(item.id))
+    localStorage.setItem("analysisHistory", JSON.stringify(updatedHistory))
+    setHistory(updatedHistory)
+    setSelectedItems([])
+    setSelectAll(false)
+
+    const real = updatedHistory.filter((d) => d.verdict === "REAL").length
+    const fake = updatedHistory.filter((d) => d.verdict === "FAKE").length
+    const unverified = updatedHistory.filter((d) => d.verdict === "UNVERIFIED").length
+    const avgConfidence =
+      updatedHistory.reduce((sum: number, d: HistoryItem) => sum + d.confidence_score, 0) / (updatedHistory.length || 1)
+
+    setStats({
+      total: updatedHistory.length,
+      real,
+      fake,
+      unverified,
+      avgConfidence: Math.round(avgConfidence),
+    })
   }
 
   if (loading) {
@@ -182,17 +217,25 @@ function HistoryTab() {
   return (
     <div className="space-y-6">
       <Card className="p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
             <h2 className="text-2xl font-semibold">Analysis History</h2>
             <div className="text-sm text-muted-foreground mt-1">{stats.total} total analyses</div>
           </div>
-          <button
-            onClick={handleClearAll}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            Clear All
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={handleSelectAll}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {selectAll ? "Deselect All" : "Select All"}
+            </button>
+            <button
+              onClick={handleDeleteSelected}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              Delete Selected
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-4 gap-4">
@@ -217,30 +260,55 @@ function HistoryTab() {
 
       <div className="space-y-3">
         {history.map((item) => (
-          <Card key={item.id} className="p-4 hover:bg-muted/50 transition-colors">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <p className="font-semibold line-clamp-2">
-                  {item.input_type === "file" ? `📄 ${item.fileName || "File"}` : item.content_preview}
-                </p>
-                <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
-                  <span>{new Date(item.created_at).toLocaleDateString()}</span>
-                  <span>{item.input_type.toUpperCase()}</span>
+          <Card key={item.id} className="p-5 hover:bg-muted/50 transition-colors">
+            <div className="flex items-start gap-4">
+              <input
+                type="checkbox"
+                checked={selectedItems.includes(item.id)}
+                onChange={() => handleSelect(item.id)}
+                className="mt-2 accent-blue-600 w-4 h-4 shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start gap-2 mb-3">
+                  <p className="font-semibold line-clamp-2 text-foreground break-words">
+                    {item.input_type === "file" ? item.fileName || "File" : item.content_preview}
+                  </p>
+                </div>
+
+                <div className="h-px bg-border/40 my-3" />
+
+                <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    <span>
+                      {new Date(item.created_at).toLocaleDateString()} -{" "}
+                      {new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <span>•</span>
+                  <div className="flex items-center gap-1">
+                    <span className="uppercase text-xs font-medium">
+                      {item.input_type === "file" ? "FILE" : item.input_type === "url" ? "URL" : "TEXT"}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="text-right ml-4">
+
+              <div className="text-right ml-4 shrink-0">
                 <div
-                  className={`font-bold ${
+                  className={`font-bold text-sm mb-2 px-3 py-1 rounded-full inline-block ${
                     item.verdict === "REAL"
-                      ? "text-green-600"
+                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
                       : item.verdict === "FAKE"
-                        ? "text-red-600"
-                        : "text-yellow-600"
+                        ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                        : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-600"
                   }`}
                 >
                   {item.verdict}
                 </div>
-                <div className="text-lg font-bold">{item.confidence_score}%</div>
+                <div className="flex items-center gap-1 justify-end">
+                  <span className="text-xl font-bold text-foreground">{item.confidence_score}%</span>
+                  <span className="text-xs text-muted-foreground">confidence</span>
+                </div>
               </div>
             </div>
           </Card>
