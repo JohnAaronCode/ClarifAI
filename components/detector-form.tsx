@@ -186,7 +186,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           <div className="relative">
             <Input
               type="url"
-              placeholder="Enter news article URL (e.g., https://rappler.com/article)..."
+              placeholder="Enter news article URL"
               value={urlInput}
               onChange={handleUrlChange}
               className="pr-10"
@@ -201,7 +201,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
               </button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">We'll fetch and analyze the article content from the URL</p>
+          <p className="text-xs text-muted-foreground">We will extract and analyze the content of the article at the specified URL.</p>
           <Button
             onClick={handleUrlSubmit}
             disabled={loading || !urlInput.trim()}
