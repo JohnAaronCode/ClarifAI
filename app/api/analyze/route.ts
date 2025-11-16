@@ -1,4 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
+import {
+  classifyWithZeroShot,
+  analyzeSentimentWithTransformers,
+  extractEntitiesWithNER,
+  computeSemanticSimilarity,
+  analyzeWithOpenAI,
+  ensembleAnalysis,
+} from "@/lib/ml-utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,10 +54,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (type === "file" && content.startsWith("[")) {
-      processedContent =
-        "File uploaded: " + content + ". Please provide file content or use URL/text input for analysis."
-    }
 
     const validationResult = validateContent(processedContent, type)
     if (!validationResult.isValid) {
@@ -60,7 +64,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const analysis = await analyzeContent(processedContent, type, fileName)
+    const analysis = await analyzeContentWithDualEngine(processedContent, type, fileName)
     return NextResponse.json(analysis)
   } catch (error) {
     console.error("Analysis error:", error)
@@ -109,127 +113,120 @@ function validateContent(content: string, type: string): { isValid: boolean; mes
   return { isValid: true, message: "" }
 }
 
-async function analyzeContent(content: string, type: string, fileName?: string) {
+async function analyzeContentWithDualEngine(content: string, type: string, fileName?: string) {
+  const hfApiKey = process.env.HUGGINGFACE_API_KEY
+  const openaiApiKey = process.env.OPENAI_API_KEY
+
+  // Run heuristic analysis
   const entities = extractEntitiesAdvanced(content)
   const claims = extractMainClaims(content)
-  const sentimentAnalysis = analyzeSentiment(content)
   const sourceAnalysis = analyzeSource(content, type)
   const factChecks = await generateFactChecksWithRealAPIs(content, claims)
   const clickbaitScore = detectClickbait(content)
   const credibilityPatterns = analyzeCredibilityPatterns(content)
+
+  // Run ensemble if available
+  let ensembleResult: any = null
+  if (hfApiKey || openaiApiKey) {
+    console.log("[v0] Running dual-engine analysis (HF + OpenAI)...")
+    ensembleResult = await ensembleAnalysis(content, hfApiKey || "", openaiApiKey || "")
+  }
+
+  // ML sentiment analysis
+  let mlSentiment: any = null
+  if (hfApiKey) {
+    mlSentiment = await analyzeSentimentWithTransformers(content, hfApiKey)
+  }
+
+  const sentimentAnalysis = mlSentiment
+    ? {
+        score: mlSentiment.detailed_scores.positive - mlSentiment.detailed_scores.negative,
+        emotionalScore: mlSentiment.detailed_scores.negative,
+        label: mlSentiment.label,
+        ml_enhanced: true,
+      }
+    : analyzeSentiment(content)
+
+  // NER entities
+  let mlEntities: any[] = []
+  if (hfApiKey) {
+    const nerResults = await extractEntitiesWithNER(content, hfApiKey)
+    mlEntities = nerResults
+      .map((entity: any) => ({
+        text: entity.word,
+        type: entity.entity_group,
+        score: entity.score,
+      }))
+      .slice(0, 8)
+  }
 
   let verdict: "REAL" | "FAKE" | "UNVERIFIED" = "UNVERIFIED"
   let confidence = 50
   let explanation = ""
   let reference = sourceAnalysis.source || ""
 
-  const scores = {
-    factCheck: 0,
-    source: sourceAnalysis.credibility,
-    sentiment: sentimentAnalysis.emotionalScore,
-    clickbait: clickbaitScore,
-    entities: Math.min(entities.persons.length + entities.organizations.length, 5) / 5,
-    credibilityPatterns: credibilityPatterns.score,
-  }
+  if (ensembleResult) {
+    // Use ensemble as primary verdict
+    verdict = ensembleResult.primary_verdict as any
+    confidence = Math.min(ensembleResult.confidence_score, 99)
 
-  if (factChecks.length > 0 && factChecks[0].source !== "Source not identified") {
-    const bestFact = factChecks[0]
-    reference = bestFact.source
-    const conclusion = bestFact.conclusion.toLowerCase()
+    if (verdict === "FAKE" && confidence > 70) {
+      explanation = `Dual-engine ML (HF + OpenAI) detected suspicious patterns. ${ensembleResult.ensemble_reasoning}${
+        clickbaitScore > 0.6 ? " Clickbait indicators present." : ""
+      }`
+    } else if (verdict === "REAL" && confidence > 75) {
+      explanation = `Verified by dual ML engines. ${ensembleResult.ensemble_reasoning} Professional structure detected.`
+    } else if (factChecks.length > 0 && factChecks[0].source !== "Source not identified") {
+      const bestFact = factChecks[0]
+      reference = bestFact.source
+      const conclusion = bestFact.conclusion.toLowerCase()
 
-    if (
-      conclusion.includes("true") ||
-      conclusion.includes("correct") ||
-      conclusion.includes("accurate") ||
-      conclusion.includes("verified")
-    ) {
-      verdict = "REAL"
-      confidence = Math.min(96, 90 + scores.source * 10)
-      explanation = `Verified by ${bestFact.reviewer || "trusted fact-checking sources"}.`
-    } else if (
-      conclusion.includes("false") ||
-      conclusion.includes("wrong") ||
-      conclusion.includes("incorrect") ||
-      conclusion.includes("misleading") ||
-      conclusion.includes("false")
-    ) {
-      verdict = "FAKE"
-      confidence = Math.min(98, 92 + scores.source * 10)
-      explanation = `Flagged as FALSE by ${bestFact.reviewer || "fact-checkers"}. ${bestFact.conclusion}`
-    } else if (
-      conclusion.includes("mixture") ||
-      conclusion.includes("partial") ||
-      conclusion.includes("partly") ||
-      conclusion.includes("unconfirmed")
-    ) {
-      verdict = "UNVERIFIED"
-      confidence = 68
-      explanation = `Mixed findings: Contains both accurate and false elements. See fact-check references below.`
+      if (conclusion.includes("true") || conclusion.includes("correct") || conclusion.includes("accurate")) {
+        verdict = "REAL"
+        confidence = Math.min(96, 88 + sourceAnalysis.credibility * 10)
+        explanation = `Fact-checked by ${bestFact.reviewer}. ML engines confirm: ${ensembleResult.ensemble_reasoning}`
+      } else if (conclusion.includes("false") || conclusion.includes("wrong")) {
+        verdict = "FAKE"
+        confidence = Math.min(98, 90 + sourceAnalysis.credibility * 10)
+        explanation = `Flagged FALSE by ${bestFact.reviewer}. ML analysis confirms: ${ensembleResult.ensemble_reasoning}`
+      } else {
+        verdict = "UNVERIFIED"
+        confidence = 65
+        explanation = `Mixed findings. ML analysis: ${ensembleResult.ensemble_reasoning}`
+      }
+    } else {
+      explanation = ensembleResult.ensemble_reasoning
     }
   } else if (
     sourceAnalysis.credibility >= 0.9 &&
     content.length > 300 &&
     sentimentAnalysis.emotionalScore < 0.45 &&
-    credibilityPatterns.score > 0.8 &&
-    !credibilityPatterns.hasIssues
+    credibilityPatterns.score > 0.8
   ) {
     verdict = "REAL"
-    confidence = Math.min(94, 85 + credibilityPatterns.score * 10)
-    explanation = `From verified ${sourceAnalysis.label}. Content shows strong credibility indicators: proper sourcing, balanced tone, and no sensationalism.`
+    confidence = 90
+    explanation = `Verified source. Strong credibility indicators detected.`
   } else if (
     sourceAnalysis.credibility < 0.35 &&
     sentimentAnalysis.emotionalScore > 0.75 &&
-    clickbaitScore > 0.7 &&
-    credibilityPatterns.issues.length >= 3
+    clickbaitScore > 0.7
   ) {
     verdict = "FAKE"
-    confidence = Math.min(95, 82 + (1 - credibilityPatterns.score) * 15)
-    explanation = `High-risk indicators detected: Low-credibility source + extreme emotional language + clickbait patterns + poor content quality. Issues: ${credibilityPatterns.issues.slice(0, 2).join(", ")}.`
-  } else if (clickbaitScore > 0.85 && sentimentAnalysis.emotionalScore > 0.8 && entities.persons.length < 2) {
-    verdict = "FAKE"
-    confidence = 78
-    explanation = `Strong manipulative patterns detected: Clickbait language (${(clickbaitScore * 100).toFixed(0)}%) + extreme emotion + lacks credible persons/organizations.`
-  } else if (
-    sourceAnalysis.credibility > 0.85 &&
-    sentimentAnalysis.emotionalScore < 0.5 &&
-    credibilityPatterns.score > 0.75
-  ) {
-    verdict = "REAL"
-    confidence = 80
-    explanation = `From reputable source: ${sourceAnalysis.label}. Balanced reporting with proper structure and no manipulative patterns.`
-  } else if (
-    entities.persons.length === 0 &&
-    entities.organizations.length === 0 &&
-    claims.length < 2 &&
-    sourceAnalysis.credibility < 0.6
-  ) {
-    verdict = "UNVERIFIED"
-    confidence = 38
-    explanation = `Cannot verify: No specific entities or clear claims mentioned. Source not established. Recommend checking with multiple reliable news outlets.`
-  } else if (
-    credibilityPatterns.hasIssues &&
-    credibilityPatterns.issues.length >= 2 &&
-    sourceAnalysis.credibility < 0.65
-  ) {
-    verdict = credibilityPatterns.issues.some((i) => i.toLowerCase().includes("vague")) ? "UNVERIFIED" : "UNVERIFIED"
-    confidence = 45 + credibilityPatterns.score * 25
-    explanation = `Content quality concerns detected: ${credibilityPatterns.issues[0]} Recommendation: Cross-check with established news sources for accuracy.`
+    confidence = 85
+    explanation = `High-risk: Low credibility + extreme emotion + clickbait.`
   } else {
     verdict = "UNVERIFIED"
-    confidence = Math.max(50, 55 + credibilityPatterns.score * 20 - sourceAnalysis.credibility * 5)
-    explanation =
-      credibilityPatterns.issues.length > 0
-        ? `Cannot definitively verify: ${credibilityPatterns.issues[0]} Please cross-reference with multiple trusted news sources for accuracy.`
-        : `Insufficient evidence to verify. Recommendation: Check multiple trusted sources including ${sourceAnalysis.detectedSources.map((s) => s.name).join(", ") || "established news outlets"}.`
+    confidence = Math.max(50, 55 + credibilityPatterns.score * 20)
+    explanation = credibilityPatterns.hasIssues ? `Quality concerns: ${credibilityPatterns.issues[0]}` : `Insufficient evidence to verify.`
   }
 
   return {
     verdict,
-    confidence_score: Math.min(confidence, 99),
+    confidence_score: confidence,
     explanation,
     reference,
     source_links: sourceAnalysis.detectedSources,
-    key_entities: entities,
+    key_entities: mlEntities.length > 0 ? mlEntities : entities,
     sentiment_score: sentimentAnalysis.score,
     sentiment_label: sentimentAnalysis.label,
     source_credibility: Math.round(sourceAnalysis.credibility * 100),
@@ -239,9 +236,12 @@ async function analyzeContent(content: string, type: string, fileName?: string) 
     fact_check_results: factChecks,
     clickbait_score: clickbaitScore,
     file_name: fileName,
+    ml_enhanced: !!ensembleResult,
+    ensemble_analysis: ensembleResult,
   }
 }
 
+// ... existing helper functions ...
 function analyzeSentiment(text: string) {
   const emotionalWords = {
     extreme: [
@@ -273,12 +273,10 @@ function analyzeSentiment(text: string) {
 
   const lowerText = text.toLowerCase()
   let emotionalScore = 0
-  let extremeCount = 0
 
   for (const word of emotionalWords.extreme) {
     const occurrences = (lowerText.match(new RegExp(`\\b${word}\\b`, "gi")) || []).length
     emotionalScore += occurrences * 0.2
-    extremeCount += occurrences
   }
 
   for (const word of emotionalWords.high) {
@@ -331,27 +329,17 @@ function detectClickbait(text: string): number {
 
   const lowerText = text.toLowerCase()
   let clickbaitScore = 0
-  let patterns = 0
 
   for (const pattern of clickbaitPatterns.urgency) {
-    if (lowerText.includes(pattern)) {
-      clickbaitScore += 0.16
-      patterns++
-    }
+    if (lowerText.includes(pattern)) clickbaitScore += 0.16
   }
 
   for (const pattern of clickbaitPatterns.exaggeration) {
-    if (lowerText.includes(pattern)) {
-      clickbaitScore += 0.13
-      patterns++
-    }
+    if (lowerText.includes(pattern)) clickbaitScore += 0.13
   }
 
   for (const pattern of clickbaitPatterns.vague) {
-    if (lowerText.includes(pattern)) {
-      clickbaitScore += 0.22
-      patterns++
-    }
+    if (lowerText.includes(pattern)) clickbaitScore += 0.22
   }
 
   const questionMarks = (text.match(/\?/g) || []).length
@@ -373,17 +361,6 @@ function extractEntitiesAdvanced(text: string) {
         organizations.add(pair)
       } else {
         persons.add(pair)
-      }
-    }
-  }
-
-  for (const word of words) {
-    if (/^[A-Z][a-z]+/.test(word) && word.length > 3) {
-      const context = words.join(" ").toLowerCase()
-      if (context.includes("president") || context.includes("minister") || context.includes("said")) {
-        persons.add(word)
-      } else if (word.includes("Inc") || word.includes("Corp")) {
-        organizations.add(word)
       }
     }
   }
@@ -445,7 +422,7 @@ function analyzeSource(content: string, type: string) {
         detectedSources.push({ name: match.name, url: match.url })
         credibility = match.credibility
         const isLocal = localSources.some((s) => s.domain === match.domain)
-        label = isLocal ? `🇵🇭 Verified Philippine news: ${match.name}` : `Verified International source: ${match.name}`
+        label = isLocal ? `Verified Philippine news: ${match.name}` : `Verified International source: ${match.name}`
       } else {
         detectedSource = parsed.href
         credibility = 0.35
@@ -463,7 +440,7 @@ function analyzeSource(content: string, type: string) {
         detectedSources.push({ name: src.name, url: src.url })
         credibility = src.credibility
         const isLocal = localSources.some((s) => s.domain === src.domain)
-        label = isLocal ? `🇵🇭 Verified Philippine news: ${src.name}` : `Verified International source: ${src.name}`
+        label = isLocal ? `Verified Philippine news: ${src.name}` : `Verified International source: ${src.name}`
         break
       }
     }
@@ -523,34 +500,6 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
         }
       } catch (err) {
         console.error("[NewsAPI] Error:", err)
-      }
-    }
-
-    if (results.length === 0 && hfApiKey) {
-      try {
-        const hfRes = await fetch("https://api-inference.huggingface.co/models/roberta-base-openai-detector", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${hfApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ inputs: mainClaim }),
-          signal: AbortSignal.timeout(5000),
-        })
-        if (hfRes.ok) {
-          const hfData = await hfRes.json()
-          const score = hfData?.[0]?.[0]?.score ?? 0
-          results.push({
-            claim: mainClaim,
-            conclusion:
-              score > 0.6 ? "Likely AI-generated or fabricated" : "Appears to be human-written factual content",
-            source: "https://huggingface.co/openai/gpt2",
-            reviewer: "AI Content Detection",
-            relevance: 0.7,
-          })
-        }
-      } catch (err) {
-        console.error("[HuggingFace] Error:", err)
       }
     }
   } catch (err) {

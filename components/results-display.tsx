@@ -1,7 +1,7 @@
 "use client"
 
 import { Card } from "@/components/ui/card"
-import { ExternalLink, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react"
+import { ExternalLink, AlertCircle, CheckCircle2, AlertTriangle, Zap } from 'lucide-react'
 
 interface ResultsDisplayProps {
   result: {
@@ -18,6 +18,8 @@ interface ResultsDisplayProps {
     source_label?: string
     credibility_indicators?: any
     fact_check_results?: any
+    ml_enhanced?: boolean
+    ml_classification?: any
   }
   inputContent: string
 }
@@ -122,12 +124,13 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
 
   return (
     <div className="space-y-4">
-      {/* Main Verdict Card */}
       <Card className={`p-6 border-2 ${getVerdictColor()}`}>
         <div className="flex items-start gap-4">
           <div className={`${getVerdictTextColor()} shrink-0`}>{getVerdictIcon()}</div>
           <div className="flex-1">
-            <h3 className={`text-2xl font-bold ${getVerdictTextColor()} mb-2`}>{result.verdict}</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className={`text-2xl font-bold ${getVerdictTextColor()}`}>{result.verdict}</h3>
+            </div>
             <p className="text-sm text-muted-foreground mb-3">Confidence: {result.confidence_score}%</p>
 
             <div className="w-full bg-gray-300 dark:bg-gray-700 rounded-full h-1.5 mb-4 overflow-hidden">
@@ -138,6 +141,13 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
             </div>
 
             <p className="text-sm text-foreground">{result.explanation}</p>
+
+            {result.ml_classification && (
+              <div className="mt-3 p-3 bg-white/50 dark:bg-black/20 rounded text-xs text-muted-foreground">
+                ML Confidence: {(result.ml_classification.score * 100).toFixed(1)}% for{" "}
+                <span className="font-semibold capitalize">{result.ml_classification.label}</span>
+              </div>
+            )}
           </div>
           <div className="shrink-0">
             <span className={`text-2xl font-bold px-3 py-2 rounded ${getVerdictTextColor()} bg-white/20`}>
@@ -162,10 +172,10 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
                 rel="noopener noreferrer"
                 className="p-3 border border-blue-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 hover:bg-blue-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-between group"
               >
-                <span className="text-sm font-medium text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200">
-                  {src.name}
+                <span className="text-sm font-medium text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200 truncate">
+                  {new URL(src.url).hostname?.replace('www.', '') || src.name}
                 </span>
-                <ExternalLink className="w-4 h-4 text-blue-500 dark:text-blue-400 group-hover:text-blue-700 dark:group-hover:text-blue-300" />
+                <ExternalLink className="w-4 h-4 text-blue-500 dark:text-blue-400 group-hover:text-blue-700 dark:group-hover:text-blue-300 shrink-0 ml-2" />
               </a>
             ))}
           </div>

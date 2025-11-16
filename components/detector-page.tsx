@@ -103,7 +103,7 @@ export default function DetectorPage() {
             <Card className="p-6">
               <h2 className="text-2xl font-semibold mb-2">Verify News Content</h2>
               <p className="text-muted-foreground mb-6">
-                Enter a news article, link, or upload a file to check if it's real or fake
+                Enter a news article or URL to check if it's real or fake.
               </p>
 
               <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
@@ -270,7 +270,7 @@ function HistoryTab() {
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-start gap-2 mb-3">
-                  <p className="font-semibold line-clamp-2 text-foreground break-words">
+                  <p className="font-semibold line-clamp-2 text-foreground wrap-break-words">
                     {item.input_type === "file" ? item.fileName || "File" : item.content_preview}
                   </p>
                 </div>
