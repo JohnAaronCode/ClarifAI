@@ -1,12 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import {
-  classifyWithZeroShot,
-  analyzeSentimentWithTransformers,
-  extractEntitiesWithNER,
-  computeSemanticSimilarity,
-  analyzeWithOpenAI,
-  ensembleAnalysis,
-} from "@/lib/ml-utils"
+import { analyzeSentimentWithTransformers, extractEntitiesWithNER, ensembleAnalysis } from "@/lib/ml-utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,7 +46,6 @@ export async function POST(request: NextRequest) {
         })
       }
     }
-
 
     const validationResult = validateContent(processedContent, type)
     if (!validationResult.isValid) {
@@ -117,7 +109,7 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
   const hfApiKey = process.env.HUGGINGFACE_API_KEY
   const openaiApiKey = process.env.OPENAI_API_KEY
 
-  // Run heuristic analysis
+  // --- Heuristic / rule-based analysis ---
   const entities = extractEntitiesAdvanced(content)
   const claims = extractMainClaims(content)
   const sourceAnalysis = analyzeSource(content, type)
@@ -125,19 +117,18 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
   const clickbaitScore = detectClickbait(content)
   const credibilityPatterns = analyzeCredibilityPatterns(content)
 
-  // Run ensemble if available
+  // --- Ensemble ML analysis if API keys available ---
   let ensembleResult: any = null
   if (hfApiKey || openaiApiKey) {
     console.log("[v0] Running dual-engine analysis (HF + OpenAI)...")
     ensembleResult = await ensembleAnalysis(content, hfApiKey || "", openaiApiKey || "")
   }
 
-  // ML sentiment analysis
+  // --- Sentiment analysis ---
   let mlSentiment: any = null
   if (hfApiKey) {
     mlSentiment = await analyzeSentimentWithTransformers(content, hfApiKey)
   }
-
   const sentimentAnalysis = mlSentiment
     ? {
         score: mlSentiment.detailed_scores.positive - mlSentiment.detailed_scores.negative,
@@ -147,7 +138,7 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
       }
     : analyzeSentiment(content)
 
-  // NER entities
+  // --- NER entities (ML-based) ---
   let mlEntities: any[] = []
   if (hfApiKey) {
     const nerResults = await extractEntitiesWithNER(content, hfApiKey)
@@ -160,22 +151,20 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
       .slice(0, 8)
   }
 
+  // --- Determine verdict and confidence ---
   let verdict: "REAL" | "FAKE" | "UNVERIFIED" = "UNVERIFIED"
   let confidence = 50
   let explanation = ""
   let reference = sourceAnalysis.source || ""
 
   if (ensembleResult) {
-    // Use ensemble as primary verdict
     verdict = ensembleResult.primary_verdict as any
     confidence = Math.min(ensembleResult.confidence_score, 99)
 
     if (verdict === "FAKE" && confidence > 70) {
-      explanation = `Dual-engine ML (HF + OpenAI) detected suspicious patterns. ${ensembleResult.ensemble_reasoning}${
-        clickbaitScore > 0.6 ? " Clickbait indicators present." : ""
-      }`
+      explanation = `Multiple suspicious patterns detected. ${clickbaitScore > 0.6 ? "The content uses sensationalized language. " : ""}Please verify with trusted sources.`
     } else if (verdict === "REAL" && confidence > 75) {
-      explanation = `Verified by dual ML engines. ${ensembleResult.ensemble_reasoning} Professional structure detected.`
+      explanation = `Content appears credible with professional structure. Cross-check with verified sources for confirmation.`
     } else if (factChecks.length > 0 && factChecks[0].source !== "Source not identified") {
       const bestFact = factChecks[0]
       reference = bestFact.source
@@ -184,18 +173,18 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
       if (conclusion.includes("true") || conclusion.includes("correct") || conclusion.includes("accurate")) {
         verdict = "REAL"
         confidence = Math.min(96, 88 + sourceAnalysis.credibility * 10)
-        explanation = `Fact-checked by ${bestFact.reviewer}. ML engines confirm: ${ensembleResult.ensemble_reasoning}`
+        explanation = `Fact-checked and verified as accurate by ${bestFact.reviewer}. Multiple credibility signals confirm authenticity.`
       } else if (conclusion.includes("false") || conclusion.includes("wrong")) {
         verdict = "FAKE"
         confidence = Math.min(98, 90 + sourceAnalysis.credibility * 10)
-        explanation = `Flagged FALSE by ${bestFact.reviewer}. ML analysis confirms: ${ensembleResult.ensemble_reasoning}`
+        explanation = `Contains verifiable misinformation according to ${bestFact.reviewer}. Key claims contradict factual evidence.`
       } else {
         verdict = "UNVERIFIED"
         confidence = 65
-        explanation = `Mixed findings. ML analysis: ${ensembleResult.ensemble_reasoning}`
+        explanation = `Mixed findings detected. Unable to confirm authenticity. Recommend checking multiple sources.`
       }
     } else {
-      explanation = ensembleResult.ensemble_reasoning
+      explanation = `Analysis inconclusive. Please cross-check with verified news sources for accurate information.`
     }
   } else if (
     sourceAnalysis.credibility >= 0.9 &&
@@ -205,20 +194,42 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
   ) {
     verdict = "REAL"
     confidence = 90
-    explanation = `Verified source. Strong credibility indicators detected.`
-  } else if (
-    sourceAnalysis.credibility < 0.35 &&
-    sentimentAnalysis.emotionalScore > 0.75 &&
-    clickbaitScore > 0.7
-  ) {
+    explanation = `Verified source with strong credibility indicators.`
+  } else if (sourceAnalysis.credibility < 0.35 && sentimentAnalysis.emotionalScore > 0.75 && clickbaitScore > 0.7) {
     verdict = "FAKE"
     confidence = 85
-    explanation = `High-risk: Low credibility + extreme emotion + clickbait.`
+    explanation = `High-risk content detected: Low credibility source + extreme emotional language + clickbait patterns.`
   } else {
     verdict = "UNVERIFIED"
     confidence = Math.max(50, 55 + credibilityPatterns.score * 20)
-    explanation = credibilityPatterns.hasIssues ? `Quality concerns: ${credibilityPatterns.issues[0]}` : `Insufficient evidence to verify.`
+    explanation = credibilityPatterns.hasIssues
+      ? `Quality concerns found: ${credibilityPatterns.issues[0]}. Verify with trusted sources.`
+      : `Insufficient evidence to verify. Check multiple news outlets.`
   }
+
+  // --- AWAIT async functions for detailed analysis ---
+  const sourceCredibility = await analyzeSourceCredibility(content, type, sourceAnalysis.credibility, verdict)
+  const contentQuality = await analyzeContentQuality(content, verdict, confidence)
+
+  let adjustedSourceCred = sourceCredibility.credibility_score
+  let adjustedContentQuality = contentQuality.overall_score
+
+  if (verdict === "REAL") {
+    // REAL: credibility 70-100%, content quality 70-100%
+    adjustedSourceCred = Math.max(0.7, Math.min(1, adjustedSourceCred))
+    adjustedContentQuality = Math.max(0.7, Math.min(1, adjustedContentQuality))
+  } else if (verdict === "FAKE") {
+    // FAKE: credibility 0-30%, content quality 0-40%
+    adjustedSourceCred = Math.min(0.3, adjustedSourceCred)
+    adjustedContentQuality = Math.min(0.4, adjustedContentQuality)
+  } else if (verdict === "UNVERIFIED") {
+    // UNVERIFIED: credibility 30-50%, content quality 40-60%
+    adjustedSourceCred = Math.max(0.3, Math.min(0.5, adjustedSourceCred))
+    adjustedContentQuality = Math.max(0.4, Math.min(0.6, adjustedContentQuality))
+  }
+
+  sourceCredibility.credibility_score = adjustedSourceCred
+  contentQuality.overall_score = adjustedContentQuality
 
   return {
     verdict,
@@ -238,10 +249,11 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
     file_name: fileName,
     ml_enhanced: !!ensembleResult,
     ensemble_analysis: ensembleResult,
+    source_credibility_detailed: sourceCredibility,
+    content_quality_detailed: contentQuality,
   }
 }
 
-// ... existing helper functions ...
 function analyzeSentiment(text: string) {
   const emotionalWords = {
     extreme: [
@@ -411,6 +423,9 @@ function analyzeSource(content: string, type: string) {
   let credibility = 0.5
   let label = "Unable to verify source"
 
+  // Extract key topics from content to find related sources
+  const topics = extractTopicsFromContent(text)
+
   if (type === "url" || text.startsWith("http")) {
     try {
       const parsed = new URL(content)
@@ -419,24 +434,36 @@ function analyzeSource(content: string, type: string) {
 
       if (match) {
         detectedSource = parsed.href
-        detectedSources.push({ name: match.name, url: match.url })
         credibility = match.credibility
         const isLocal = localSources.some((s) => s.domain === match.domain)
         label = isLocal ? `Verified Philippine news: ${match.name}` : `Verified International source: ${match.name}`
+
+        detectedSources.push({ name: match.name, url: match.url })
+
+        const relatedSources = allSources
+          .filter(
+            (src) =>
+              src.name !== match.name && (localSources.some((s) => s.domain === src.domain) || src.credibility >= 0.9),
+          )
+          .sort((a, b) => b.credibility - a.credibility)
+          .slice(0, 2)
+
+        detectedSources.push(...relatedSources)
       } else {
         detectedSource = parsed.href
         credibility = 0.35
         label = `Unverified source: ${host}`
+
+        const suggestedSources = localSources.slice(0, 2).concat(internationalSources.slice(0, 1))
+        detectedSources.push(...suggestedSources.map((src) => ({ name: src.name, url: src.url })))
       }
     } catch {
       /* ignore invalid URL */
     }
-  }
-
-  if (!detectedSource) {
+  } else {
+    // For text/file input: find sources mentioned or suggest top verified sources
     for (const src of allSources) {
       if (text.includes(src.domain.split(".")[0]) || text.includes(src.name.toLowerCase())) {
-        detectedSource = src.url
         detectedSources.push({ name: src.name, url: src.url })
         credibility = src.credibility
         const isLocal = localSources.some((s) => s.domain === src.domain)
@@ -444,9 +471,37 @@ function analyzeSource(content: string, type: string) {
         break
       }
     }
+
+    // If still no sources found, add top credibility sources as suggestions
+    if (detectedSources.length === 0) {
+      const topSources = localSources.slice(0, 2).concat(internationalSources.slice(0, 1))
+      detectedSources.push(...topSources.map((src) => ({ name: src.name, url: src.url })))
+      label = "Suggested verified news sources"
+    }
   }
 
-  return { credibility, label, source: detectedSource, detectedSources }
+  return { credibility, label, source: detectedSource, detectedSources: detectedSources.slice(0, 3) }
+}
+
+function extractTopicsFromContent(text: string): string[] {
+  const topics: string[] = []
+  const topicKeywords = {
+    politics: ["president", "senator", "congress", "parliament", "election", "vote", "politician", "political"],
+    health: ["disease", "health", "hospital", "doctor", "medicine", "vaccine", "pandemic", "covid"],
+    economy: ["economy", "market", "stock", "business", "trade", "investment", "finance", "money"],
+    technology: ["tech", "software", "app", "digital", "internet", "computer", "artificial"],
+    sports: ["sport", "game", "team", "player", "match", "championship", "score", "league"],
+    entertainment: ["movie", "film", "actor", "actress", "music", "singer", "celebrity", "show"],
+    science: ["research", "study", "scientist", "discovery", "experiment", "space", "nasa"],
+  }
+
+  for (const [topic, keywords] of Object.entries(topicKeywords)) {
+    if (keywords.some((kw) => text.includes(kw))) {
+      topics.push(topic)
+    }
+  }
+
+  return topics
 }
 
 async function generateFactChecksWithRealAPIs(content: string, claims: string[]) {
@@ -584,4 +639,335 @@ function analyzeCredibilityPatterns(text: string): { score: number; hasIssues: b
     hasIssues: issues.length > 0,
     issues,
   }
+}
+
+async function analyzeSourceCredibility(content: string, type: string, baseCredibility: number, verdict?: string) {
+  const googleApiKey = process.env.GOOGLE_FACT_CHECK_API_KEY
+  const newsApiKey = process.env.NEWSAPI_KEY
+  const hfApiKey = process.env.HUGGINGFACE_API_KEY
+
+  const lower = content.toLowerCase()
+  const result: any = {
+    api_checks: [],
+    credibility_score: baseCredibility,
+    credibility_label: "Neutral",
+    domain_authority: null,
+    reason: [],
+    bias_indicators: [],
+  }
+
+  // --- 1) DOMAIN AUTHORITY CHECK (if URL) ---
+  if (type === "url") {
+    try {
+      const parsed = new URL(content)
+      const domain = parsed.hostname.replace("www.", "")
+
+      const daScore = await fetch(`https://openpagerank.com/api/v1.0/getPageRank?domains[]=${domain}`, {
+        headers: { "API-OPR": process.env.OPEN_PAGE_RANK_API_KEY || "" },
+      })
+        .then((r) => r.json())
+        .catch(() => null)
+
+      if (daScore?.response?.[0]?.page_rank_integer) {
+        const pageRank = daScore.response[0].page_rank_integer
+        result.domain_authority = pageRank / 10 // normalize 0–10 -> 0–1
+        result.credibility_score = (result.credibility_score + result.domain_authority) / 2
+        result.reason.push("Domain authority successfully retrieved.")
+      } else {
+        result.reason.push("Domain authority unavailable.")
+      }
+    } catch {
+      result.reason.push("URL parsing failed.")
+    }
+  }
+
+  // --- 2) GOOGLE FACT CHECK API (CREDIBILITY BY VERIFICATION) ---
+  if (googleApiKey) {
+    try {
+      const query = content.substring(0, 120)
+      const url = `https://factchecktools.googleapis.com/v1alpha1/claims:search?query=${encodeURIComponent(query)}&key=${googleApiKey}`
+      const res = await fetch(url)
+      const data = await res.json()
+
+      if (data.claims?.length) {
+        result.api_checks.push({
+          api: "Google Fact Check",
+          status: "Found",
+          rating: data.claims[0].claimReview?.[0]?.textualRating || "Unverified",
+        })
+
+        const rating = result.api_checks[0].rating.toLowerCase()
+        if (rating.includes("true") || rating.includes("accurate")) {
+          result.credibility_score += 0.25
+          result.reason.push("Google Fact Check marked content as accurate.")
+        } else if (rating.includes("false") || rating.includes("incorrect")) {
+          result.credibility_score -= 0.25
+          result.reason.push("Google Fact Check flagged content as false.")
+        }
+      } else {
+        result.api_checks.push({ api: "Google Fact Check", status: "No match" })
+      }
+    } catch {
+      result.api_checks.push({ api: "Google Fact Check", status: "Failed" })
+    }
+  }
+
+  // --- 3) NEWS API "trusted source" matching ---
+  if (newsApiKey) {
+    try {
+      const res = await fetch(`https://newsapi.org/v2/top-headlines?language=en&apiKey=${newsApiKey}`)
+      const data = await res.json()
+
+      if (data.sources) {
+        const trusted = data.sources.map((s: any) => s.name.toLowerCase())
+        const mentionedTrusted = trusted.some((src: string) => lower.includes(src))
+
+        if (mentionedTrusted) {
+          result.credibility_score += 0.1
+          result.reason.push("Trusted news outlet mentioned in text.")
+        }
+      }
+    } catch {
+      /* skip */
+    }
+  }
+
+  // --- 4) HUGGINGFACE "credibility classifier" ---
+  if (hfApiKey) {
+    try {
+      const hfRes = await fetch(
+        "https://router.huggingface.co/hf-inference/models/cross-encoder/ms-marco-MiniLM-L-6-v2",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${hfApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: [[content, "credible news article"]],
+          }),
+        },
+      )
+
+      const score = Array.isArray(await hfRes.json()) ? (await hfRes.json())[0] : 0
+      result.api_checks.push({ api: "HuggingFace Credibility", score })
+
+      result.credibility_score = (result.credibility_score + score) / 2
+    } catch {
+      result.api_checks.push({ api: "HuggingFace Credibility", status: "Failed" })
+    }
+  }
+
+  // --- FINAL LABEL ---
+  const final = result.credibility_score
+
+  result.credibility_label =
+    final > 0.8 ? "Highly credible" : final > 0.6 ? "Credible" : final > 0.4 ? "Uncertain" : "Low credibility"
+
+  // --- BIAS RATING (with explanations) ---
+  try {
+    const knownRight = ["foxnews.com", "breitbart.com", "dailycaller.com"]
+    const knownLeft = ["cnn.com", "msnbc.com", "huffpost.com"]
+    const knownCenter = ["reuters.com", "apnews.com", "bbc.com", "nytimes.com"]
+
+    if (result.domain_authority && typeof result.domain_authority === "number" && result.domain_authority > 0) {
+      const domain =
+        typeof content === "string" && type === "url"
+          ? (() => {
+              try {
+                return new URL(content).hostname.replace("www.", "")
+              } catch {
+                return ""
+              }
+            })()
+          : ""
+
+      if (domain) {
+        if (knownRight.some((d) => domain.includes(d))) {
+          result.bias_rating = "Right-leaning"
+          result.bias_indicators = [
+            "Known right-leaning editorial stance",
+            "Opinion content may reflect political bias",
+          ]
+        } else if (knownLeft.some((d) => domain.includes(d))) {
+          result.bias_rating = "Left-leaning"
+          result.bias_indicators = ["Known left-leaning editorial stance", "Opinion content may reflect political bias"]
+        } else if (knownCenter.some((d) => domain.includes(d))) {
+          result.bias_rating = "Neutral"
+          result.bias_indicators = [
+            "Reputable news organization with neutral reporting standards",
+            "Strong editorial guidelines minimize bias",
+          ]
+        } else {
+          result.bias_rating = "Unable to determine"
+          result.bias_indicators = [
+            "Unknown source credibility",
+            "Recommend cross-checking with established news organizations",
+          ]
+        }
+      } else {
+        result.bias_rating = "Unable to determine"
+        result.bias_indicators = ["Source domain not provided", "Bias assessment requires source verification"]
+      }
+    } else {
+      result.bias_rating = "Unable to determine"
+      result.bias_indicators = [
+        "Insufficient source information available",
+        "Bias determination requires domain analysis",
+      ]
+    }
+  } catch {
+    result.bias_rating = "Unable to determine"
+    result.bias_indicators = ["Error during bias assessment", "Manual source verification recommended"]
+  }
+
+  if (verdict === "FAKE") {
+    result.credibility_score = Math.min(0.3, result.credibility_score)
+    result.credibility_label = "Low credibility"
+  } else if (verdict === "REAL") {
+    result.credibility_score = Math.max(0.7, result.credibility_score)
+    result.credibility_label = "High credibility"
+  }
+
+  return result
+}
+
+async function analyzeContentQuality(content: string, verdict?: string, confidence?: number) {
+  const ltKey = process.env.LT_API_KEY
+  const hfApiKey = process.env.HUGGINGFACE_API_KEY
+
+  const result: any = {
+    readability_score: null,
+    grammar_issues: [],
+    coherence_score: null,
+    structure: {
+      paragraphs: content.split(/\n\s*\n/).length,
+      avg_sentence_length: 0,
+    },
+    quality_label: "Neutral",
+  }
+
+  // --- READABILITY ---
+  const sentences = content.split(/[.!?]+/).filter((s) => s.trim().length)
+  const words = content.split(/\s+/).length
+  result.structure.avg_sentence_length = Math.round(words / Math.max(sentences.length, 1))
+
+  result.readability_score = Math.max(0, Math.min(1, 1 - result.structure.avg_sentence_length / 40))
+
+  // --- LANGUAGETOOL GRAMMAR API ---
+  if (ltKey) {
+    try {
+      const res = await fetch("https://api.languagetoolplus.com/v2/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          text: content,
+          language: "en-US",
+          apiKey: ltKey,
+        }),
+      })
+
+      const data = await res.json()
+      result.grammar_issues = data.matches?.slice(0, 5) || []
+    } catch {}
+  }
+
+  // --- HUGGINGFACE COHERENCE ---
+  if (hfApiKey) {
+    try {
+      const response = await fetch(
+        "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${hfApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: [content, "highly coherent professionally written article"],
+          }),
+        },
+      )
+
+      const score = Array.isArray(await response.json()) ? (await response.json())[0] : 0
+      result.coherence_score = score
+    } catch {}
+  }
+
+  // --- SPECIFICITY heuristics ---
+  const numbersCount = (content.match(/\b\d{1,4}\b/g) || []).length
+  const dateMatches = (content.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\b|\b\d{4}\b/g) || [])
+    .length
+  const namedSourcePatterns = [/according to/i, /reported by/i, /said/i, /source:/i, /\bvia\b/i]
+  const namedSourcesCount = namedSourcePatterns.reduce((acc, p) => acc + (p.test(content) ? 1 : 0), 0)
+  const namedEntitiesCount = (content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b/g) || []).length
+
+  const specificityScore = Math.max(
+    0,
+    Math.min(
+      1,
+      Math.min(10, numbersCount) * 0.04 +
+        Math.min(3, dateMatches) * 0.12 +
+        Math.min(3, namedSourcesCount) * 0.25 +
+        Math.min(6, namedEntitiesCount) * 0.02,
+    ),
+  )
+
+  let specificity_label = "Unspecific"
+  if (specificityScore > 0.75) specificity_label = "Highly specific"
+  else if (specificityScore > 0.5) specificity_label = "Somewhat specific"
+  else if (specificityScore > 0.3) specificity_label = "Slightly specific"
+
+  // --- EVIDENCE STRENGTH with verdict-aware adjustments ---
+  const citationPatterns = [
+    /according to\s+(?:sources|officials|experts)/i,
+    /research\s+(?:shows|indicates|suggests)/i,
+    /studies?\s+(?:found|show|indicate)/i,
+    /experts?\s+(?:say|warn|suggest)/i,
+    /\[\d+\]/,
+  ]
+  const citationCount = citationPatterns.reduce((acc, p) => acc + (p.test(content) ? 1 : 0), 0)
+
+  const grammarPenalty = Math.min(1, result.grammar_issues.length / 6)
+  const evidenceScore = Math.max(
+    0,
+    Math.min(
+      1,
+      Math.min(3, citationCount) * 0.28 + (1 - grammarPenalty) * 0.32 + (result.coherence_score || 0.5) * 0.4,
+    ),
+  )
+
+  let evidence_strength_label = "Poor"
+  if (evidenceScore > 0.75) evidence_strength_label = "Strong"
+  else if (evidenceScore > 0.5) evidence_strength_label = "Moderate"
+  else if (evidenceScore > 0.35) evidence_strength_label = "Weak"
+
+  if (verdict === "FAKE") {
+    result.overall_score = Math.min(0.4, evidenceScore)
+    evidence_strength_label = "Weak"
+  } else if (verdict === "REAL") {
+    result.overall_score = Math.max(0.7, evidenceScore)
+    evidence_strength_label = "Strong"
+  } else if (verdict === "UNVERIFIED") {
+    result.overall_score = Math.max(0.4, Math.min(0.6, evidenceScore))
+    evidence_strength_label = evidence_strength_label === "Poor" ? "Weak" : evidence_strength_label
+  } else {
+    result.overall_score = evidenceScore
+  }
+
+  result.specificity_label = specificity_label
+  result.specificity_score = specificityScore
+  result.evidence_strength_label = evidence_strength_label
+  result.evidence_strength_score = evidenceScore
+
+  result.quality_label =
+    result.overall_score > 0.75
+      ? "High Quality"
+      : result.overall_score > 0.55
+        ? "Good"
+        : result.overall_score > 0.4
+          ? "Low Quality"
+          : "Poor"
+
+  return result
 }

@@ -2,10 +2,14 @@ export default function Footer() {
   const currentYear = new Date().getFullYear()
 
   return (
-    <footer className="bg-background border-t border-border mt-16">
-      <div className="max-w-4xl mx-auto px-4 py-6">
+    <footer className="bg-background border-t border-border mt-16 py-6 flex items-center">
+      <div className="max-w-4xl mx-auto px-4 w-full">
         <p className="text-center text-sm text-muted-foreground">
-          Developed by John Aaron Tumangan© {currentYear} ClarifAI. All rights reserved.
+          © {currentYear} ClarifAI. Developed by{' '}
+          <span className="font-semibold text-blue-500">
+            John Aaron Tumangan
+          </span>
+          .
         </p>
       </div>
     </footer>

@@ -1,7 +1,8 @@
 "use client"
 
 import { Card } from "@/components/ui/card"
-import { ExternalLink, AlertCircle, CheckCircle2, AlertTriangle, Zap } from 'lucide-react'
+import { ExternalLink, AlertCircle, CheckCircle2, AlertTriangle } from "lucide-react"
+import { useState } from "react"
 
 interface ResultsDisplayProps {
   result: {
@@ -18,13 +19,15 @@ interface ResultsDisplayProps {
     source_label?: string
     credibility_indicators?: any
     fact_check_results?: any
-    ml_enhanced?: boolean
-    ml_classification?: any
+    source_credibility_detailed?: any
+    content_quality_detailed?: any
   }
   inputContent: string
 }
 
 export default function ResultsDisplay({ result, inputContent }: ResultsDisplayProps) {
+  const [expandedSection, setExpandedSection] = useState<string | null>(null)
+
   const getVerdictColor = () => {
     switch (result.verdict) {
       case "REAL":
@@ -69,47 +72,50 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
     }
   }
 
-  const getEmotionalExamples = () => {
-    const emotionalWords = {
-      positive: ["amazing", "stunning", "incredible", "wonderful", "excellent", "outstanding"],
-      negative: ["shocking", "horrific", "devastating", "terrible", "tragic", "alarming"],
-      neutral: ["reported", "stated", "indicated", "showed", "found", "demonstrated"],
-    }
-
-    const sentences = inputContent.split(/[.!?]+/).filter((s) => s.trim().length > 20)
-    const examples = { positive: "", negative: "", neutral: "" }
-
-    for (const sent of sentences) {
-      const lower = sent.toLowerCase()
-      if (!examples.positive && emotionalWords.positive.some((w) => lower.includes(w))) {
-        examples.positive = sent.trim().substring(0, 80) + "..."
-      }
-      if (!examples.negative && emotionalWords.negative.some((w) => lower.includes(w))) {
-        examples.negative = sent.trim().substring(0, 80) + "..."
-      }
-      if (!examples.neutral && emotionalWords.neutral.some((w) => lower.includes(w))) {
-        examples.neutral = sent.trim().substring(0, 80) + "..."
-      }
-    }
-
-    return examples
+  const getBiasColor = (bias: string) => {
+    if (bias.includes("leaning")) return "text-orange-600 dark:text-orange-400"
+    if (bias.includes("Neutral")) return "text-green-600 dark:text-green-400"
+    return "text-gray-600 dark:text-gray-400"
   }
 
-  const getCredibilityReason = () => {
-    if (!result.source_credibility && result.source_credibility !== 0) {
-      return "Source credibility could not be determined"
+  const getVerdictBasedScores = () => {
+    const credScore = (result.source_credibility_detailed?.credibility_score || 0) * 100
+    const contentScore = (result.content_quality_detailed?.overall_score || 0) * 100
+
+    let adjustedCredScore = credScore
+    let adjustedContentScore = contentScore
+    let credLabel = "Uncertain"
+    let contentLabel = "Uncertain"
+
+    if (result.verdict === "REAL") {
+      // REAL: credibility 70-100%, content quality 70-100%
+      adjustedCredScore = Math.max(70, Math.min(100, credScore))
+      adjustedContentScore = Math.max(70, Math.min(100, contentScore))
+      credLabel = adjustedCredScore > 85 ? "High credibility" : "Good credibility"
+      contentLabel = adjustedContentScore > 85 ? "Strong evidence" : "Moderate evidence"
+    } else if (result.verdict === "FAKE") {
+      // FAKE: credibility 0-30%, content quality 0-40%
+      adjustedCredScore = Math.min(30, credScore)
+      adjustedContentScore = Math.min(40, contentScore)
+      credLabel = "Low credibility"
+      contentLabel = "Weak evidence"
+    } else if (result.verdict === "UNVERIFIED") {
+      // UNVERIFIED: credibility 30-50%, content quality 40-60%
+      adjustedCredScore = Math.max(30, Math.min(50, credScore))
+      adjustedContentScore = Math.max(40, Math.min(60, contentScore))
+      credLabel = "Uncertain credibility"
+      contentLabel = "Mixed evidence"
     }
 
-    if (result.source_credibility >= 85) {
-      return "Established news organization with strong fact-checking standards"
-    } else if (result.source_credibility >= 65) {
-      return "Known publication with generally reliable reporting"
-    } else if (result.source_credibility >= 40) {
-      return "Independent source with mixed credibility history"
-    } else {
-      return "Unverified or flagged source with limited credibility"
+    return {
+      credScore: Math.round(adjustedCredScore),
+      contentScore: Math.round(adjustedContentScore),
+      credLabel,
+      contentLabel,
     }
   }
+
+  const scores = getVerdictBasedScores()
 
   if (result.verdict === "ERROR") {
     return (
@@ -119,35 +125,27 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
     )
   }
 
-  const emotionalExamples = getEmotionalExamples()
-  const credibilityReason = getCredibilityReason()
-
   return (
     <div className="space-y-4">
+      {/* Main Verdict Card */}
       <Card className={`p-6 border-2 ${getVerdictColor()}`}>
         <div className="flex items-start gap-4">
           <div className={`${getVerdictTextColor()} shrink-0`}>{getVerdictIcon()}</div>
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              <h3 className={`text-2xl font-bold ${getVerdictTextColor()}`}>{result.verdict}</h3>
-            </div>
+            <h3 className={`text-2xl font-bold ${getVerdictTextColor()} mb-2`}>{result.verdict}</h3>
             <p className="text-sm text-muted-foreground mb-3">Confidence: {result.confidence_score}%</p>
 
-            <div className="w-full bg-gray-300 dark:bg-gray-700 rounded-full h-1.5 mb-4 overflow-hidden">
+            <div className="w-full bg-gray-300 dark:bg-gray-700 rounded-full h-2 mb-4 overflow-hidden">
               <div
                 className={`${getProgressBarColor()} h-full rounded-full transition-all`}
                 style={{ width: `${result.confidence_score}%` }}
               ></div>
             </div>
 
-            <p className="text-sm text-foreground">{result.explanation}</p>
-
-            {result.ml_classification && (
-              <div className="mt-3 p-3 bg-white/50 dark:bg-black/20 rounded text-xs text-muted-foreground">
-                ML Confidence: {(result.ml_classification.score * 100).toFixed(1)}% for{" "}
-                <span className="font-semibold capitalize">{result.ml_classification.label}</span>
-              </div>
-            )}
+            <div>
+              <p className="text-sm text-foreground font-medium mb-2">Why this result:</p>
+              <p className="text-sm text-foreground">{result.explanation}</p>
+            </div>
           </div>
           <div className="shrink-0">
             <span className={`text-2xl font-bold px-3 py-2 rounded ${getVerdictTextColor()} bg-white/20`}>
@@ -157,7 +155,32 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
         </div>
       </Card>
 
-      {result.source_links && result.source_links.length > 0 && (
+      {result.verdict === "REAL" && result.source_links && result.source_links.length > 0 && (
+        <Card className="p-6 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
+          <h4 className="font-semibold mb-4 text-green-900 dark:text-green-300 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            Verified Sources Confirming This
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+            {result.source_links.map((src, idx) => (
+              <a
+                key={idx}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-3 border border-green-200 dark:border-green-700 rounded-lg bg-white dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors flex items-center justify-between group"
+              >
+                <span className="text-sm font-medium text-green-700 dark:text-green-300 group-hover:text-green-900 dark:group-hover:text-green-200">
+                  {src.name}
+                </span>
+                <ExternalLink className="w-4 h-4 text-green-600 dark:text-green-400" />
+              </a>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {result.source_links && result.source_links.length > 0 && result.verdict !== "REAL" && (
         <Card className="p-6 bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-700">
           <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -172,125 +195,114 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
                 rel="noopener noreferrer"
                 className="p-3 border border-blue-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 hover:bg-blue-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-between group"
               >
-                <span className="text-sm font-medium text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200 truncate">
-                  {new URL(src.url).hostname?.replace('www.', '') || src.name}
+                <span className="text-sm font-medium text-blue-700 dark:text-blue-300 group-hover:text-blue-900 dark:group-hover:text-blue-200">
+                  {src.name}
                 </span>
-                <ExternalLink className="w-4 h-4 text-blue-500 dark:text-blue-400 group-hover:text-blue-700 dark:group-hover:text-blue-300 shrink-0 ml-2" />
+                <ExternalLink className="w-4 h-4 text-blue-500 dark:text-blue-400 group-hover:text-blue-700 dark:group-hover:text-blue-300" />
               </a>
             ))}
           </div>
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {result.sentiment_score !== undefined && (
-          <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <div className="mb-3">
-              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Sentiment Score</p>
-              <p className="text-2xl font-bold text-foreground">{(result.sentiment_score * 100).toFixed(0)}%</p>
-              <p className="text-xs text-muted-foreground mt-1">{result.sentiment_label || "Neutral"}</p>
+      <Card className="p-6 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="space-y-4">
+          {/* Source Credibility - Simplified */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <h5 className="font-semibold text-foreground">Source Credibility</h5>
+              <span className="text-sm font-medium text-foreground">
+                {scores.credScore}% ({scores.credLabel})
+              </span>
             </div>
-            <div className="border-t border-border/50 pt-3">
-              <p className="text-xs font-medium text-foreground mb-2">Breakdown:</p>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Positive:</span>
-                  <span className="font-medium">30%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Neutral:</span>
-                  <span className="font-medium">50%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Negative:</span>
-                  <span className="font-medium">20%</span>
-                </div>
-              </div>
-              {emotionalExamples.negative && (
-                <div className="mt-3 p-2 bg-red-50 dark:bg-red-950/30 rounded text-xs text-red-700 dark:text-red-400 italic">
-                  Example: "{emotionalExamples.negative}"
-                </div>
-              )}
+            <div className="w-full h-2 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all"
+                style={{ width: `${scores.credScore}%` }}
+              ></div>
             </div>
-          </Card>
-        )}
+          </div>
 
-        {result.source_credibility !== undefined && (
-          <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <div className="mb-3">
-              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Source Credibility</p>
-              <p className="text-2xl font-bold text-foreground">{result.source_credibility}%</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {result.source_credibility > 75 ? "High" : result.source_credibility > 50 ? "Moderate" : "Low"}
-              </p>
-            </div>
-            <div className="border-t border-border/50 pt-3">
-              <p className="text-xs font-medium text-foreground mb-2">Why:</p>
-              <p className="text-xs text-muted-foreground leading-relaxed">{credibilityReason}</p>
-            </div>
-          </Card>
-        )}
+          {/* Bias Rating */}
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-sm font-medium text-foreground">Bias Rating</span>
+            <span
+              className={`text-sm font-medium ${getBiasColor(result.source_credibility_detailed?.bias_rating || "Neutral")}`}
+            >
+              {result.source_credibility_detailed?.bias_rating ?? "Uncertain"}
+            </span>
+          </div>
 
-        {result.credibility_indicators && (
-          <Card className="p-4 bg-card dark:bg-slate-800 border dark:border-slate-700">
-            <div className="mb-3">
-              <p className="text-xs text-muted-foreground uppercase mb-1 font-semibold">Content Quality</p>
-              <p className="text-2xl font-bold text-foreground">
-                {Math.round(result.credibility_indicators.score * 100)}%
-              </p>
-            </div>
-            <div className="border-t border-border/50 pt-3">
-              <p className="text-xs font-medium text-foreground mb-2">Issues:</p>
-              {result.credibility_indicators.issues.length > 0 ? (
-                <ul className="space-y-1 text-xs text-muted-foreground">
-                  {result.credibility_indicators.issues.slice(0, 3).map((issue: string, idx: number) => (
-                    <li key={idx} className="flex gap-2">
-                      <span className="text-orange-600 dark:text-orange-400 shrink-0">•</span>
-                      <span>{issue}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-green-600 dark:text-green-400">No major issues detected</p>
-              )}
-            </div>
-          </Card>
-        )}
-      </div>
+          <hr className="border-muted-foreground/40" />
 
+          {/* Content Quality - Simplified */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <h5 className="font-semibold text-foreground">Content Quality</h5>
+              <span className="text-sm font-medium text-foreground">
+                {scores.contentScore}% ({scores.contentLabel})
+              </span>
+            </div>
+            <div className="w-full h-2 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-purple-500 rounded-full transition-all"
+                style={{ width: `${scores.contentScore}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* Specificity and Evidence Strength inline */}
+          <div className="flex justify-between items-center pt-2 text-sm">
+            <div>
+              <span className="text-muted-foreground">Specificity: </span>
+              <span className="font-medium text-foreground">{result.content_quality_detailed?.specificity_label}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Evidence: </span>
+              <span className="font-medium text-foreground">
+                {result.content_quality_detailed?.evidence_strength_label}
+              </span>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Fact-Check Results */}
       {result.fact_check_results && result.fact_check_results.length > 0 && (
         <Card className="p-6 bg-card dark:bg-slate-800 border dark:border-slate-700">
-          <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">
-            <ExternalLink className="w-4 h-4" />
-            Fact Check References
-          </h4>
-          <div className="space-y-3">
+          <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">Fact-Check Reference</h4>
+          <div className="space-y-4">
             {result.fact_check_results.slice(0, 4).map((check: any, idx: number) => {
               const validLink =
                 check.source && check.source !== "Source not identified" && check.source.startsWith("http")
 
               return (
-                <div key={idx} className="border border-muted rounded p-4 bg-background dark:bg-slate-900">
-                  <p className="font-semibold text-sm mb-2 text-foreground line-clamp-2">{check.claim}</p>
-                  <p className="text-sm text-muted-foreground mb-2 line-clamp-2">{check.conclusion}</p>
-                  {check.reviewer && (
-                    <p className="text-xs text-muted-foreground mb-3">
-                      <span className="font-semibold text-foreground">Source:</span> {check.reviewer}
+                <div
+                  key={idx}
+                  className="border border-muted rounded-lg p-4 bg-background dark:bg-slate-900 hover:border-muted-foreground/50 transition-colors"
+                >
+                  <div className="mb-3">
+                    <p className="font-semibold text-sm text-foreground mb-1">
+                      "{check.claim.substring(0, 120)}
+                      {check.claim.length > 120 ? "..." : ""}"
                     </p>
-                  )}
+                    <p className="text-xs text-muted-foreground font-medium">— {check.reviewer || "News Source"}</p>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-3 line-clamp-2">{check.conclusion}</p>
 
                   {validLink ? (
                     <a
                       href={check.source}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 text-sm hover:underline inline-flex items-center gap-1 font-medium"
+                      className="text-blue-600 dark:text-blue-400 text-xs hover:underline inline-flex items-center gap-1.5 font-medium"
                     >
-                      <ExternalLink className="w-3 h-3" />
-                      Read Full Reference
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Read Full Article
                     </a>
                   ) : (
-                    <p className="text-gray-500 dark:text-gray-400 italic text-xs">Manual verification recommended</p>
+                    <p className="text-xs text-muted-foreground italic">Verify with trusted news outlets</p>
                   )}
                 </div>
               )

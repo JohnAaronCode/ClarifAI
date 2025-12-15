@@ -6,6 +6,8 @@ import { Card } from "@/components/ui/card"
 import Navbar from "@/components/navbar"
 import DetectorForm from "@/components/detector-form"
 import ResultsDisplay from "@/components/results-display"
+import HistoryStatsModal from "@/components/history-stats-modal"
+import Footer from "@/components/footer"
 
 interface AnalysisResult {
   verdict: "REAL" | "FAKE" | "UNVERIFIED" | "ERROR"
@@ -19,9 +21,8 @@ interface AnalysisResult {
 
 interface HistoryItem {
   id: string
-  input_type: "text" | "url" | "file"
+  input_type: "text" | "url"
   content_preview: string
-  fileName?: string
   verdict: "REAL" | "FAKE" | "UNVERIFIED"
   confidence_score: number
   explanation: string
@@ -38,7 +39,7 @@ export default function DetectorPage() {
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [inputContent, setInputContent] = useState("")
 
-  const handleAnalyze = async (content: string, type: "text" | "url" | "file", fileName?: string) => {
+  const handleAnalyze = async (content: string, type: "text" | "url") => {
     setLoading(true)
     setInputContent(content)
 
@@ -46,7 +47,7 @@ export default function DetectorPage() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, type, fileName }),
+        body: JSON.stringify({ content, type }),
       })
 
       const data = await response.json()
@@ -54,11 +55,18 @@ export default function DetectorPage() {
 
       if (data.verdict !== "ERROR") {
         const history = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+
+        const contentHash = Buffer.from(content.substring(0, 300)).toString("base64")
+
+        const existingIndex = history.findIndex(
+          (item: HistoryItem) =>
+            item.content_preview === content.substring(0, 200)
+        )
+
         const newEntry: HistoryItem = {
-          id: Date.now().toString(),
+          id: existingIndex >= 0 ? history[existingIndex].id : Date.now().toString(),
           input_type: type,
-          content_preview: type === "file" ? fileName || "File" : content.substring(0, 200),
-          fileName: fileName,
+          content_preview: content.substring(0, 200),
           verdict: data.verdict,
           confidence_score: data.confidence_score,
           explanation: data.explanation,
@@ -68,6 +76,11 @@ export default function DetectorPage() {
           fact_check_results: data.fact_check_results,
           created_at: new Date().toISOString(),
         }
+
+        if (existingIndex >= 0) {
+          history.splice(existingIndex, 1)
+        }
+
         history.unshift(newEntry)
         localStorage.setItem("analysisHistory", JSON.stringify(history))
       }
@@ -84,12 +97,12 @@ export default function DetectorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
 
-      <main className="max-w-4xl mx-auto px-4 py-8">
+      <main className="max-w-4xl mx-auto px-4 py-8 flex-1 w-full">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2 text-center">ClarifiAI</h1>
+          <h1 className="text-4xl font-bold mb-2 text-center">ClarifAI</h1>
           <p className="text-center text-muted-foreground">Fake News Detector</p>
         </div>
 
@@ -101,10 +114,8 @@ export default function DetectorPage() {
 
           <TabsContent value="detector" className="space-y-6">
             <Card className="p-6">
-              <h2 className="text-2xl font-semibold mb-2">Verify News Content</h2>
-              <p className="text-muted-foreground mb-6">
-                Enter a news article or URL to check if it's real or fake.
-              </p>
+              <h2 className="text-2xl font-semibold mb-2">Verify News Accuracy</h2>
+              <p className="text-muted-foreground mb-6">Enter a news article or URL to check if it's real or fake.</p>
 
               <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
             </Card>
@@ -117,6 +128,8 @@ export default function DetectorPage() {
           </TabsContent>
         </Tabs>
       </main>
+
+      <Footer />
     </div>
   )
 }
@@ -127,36 +140,29 @@ function HistoryTab() {
   const [loading, setLoading] = useState(true)
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [selectAll, setSelectAll] = useState(false)
+  const [statsModalOpen, setStatsModalOpen] = useState(false)
 
   useEffect(() => {
-    const fetchHistory = () => {
-      try {
-        const savedHistory = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
-        setHistory(savedHistory)
+    const savedHistory = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+    setHistory(savedHistory)
 
-        if (savedHistory.length > 0) {
-          const real = savedHistory.filter((d: HistoryItem) => d.verdict === "REAL").length
-          const fake = savedHistory.filter((d: HistoryItem) => d.verdict === "FAKE").length
-          const unverified = savedHistory.filter((d: HistoryItem) => d.verdict === "UNVERIFIED").length
-          const avgConfidence =
-            savedHistory.reduce((sum: number, d: HistoryItem) => sum + d.confidence_score, 0) / savedHistory.length
+    if (savedHistory.length > 0) {
+      const real = savedHistory.filter((d: HistoryItem) => d.verdict === "REAL").length
+      const fake = savedHistory.filter((d: HistoryItem) => d.verdict === "FAKE").length
+      const unverified = savedHistory.filter((d: HistoryItem) => d.verdict === "UNVERIFIED").length
+      const avgConfidence =
+        savedHistory.reduce((sum: number, d: HistoryItem) => sum + d.confidence_score, 0) / savedHistory.length
 
-          setStats({
-            total: savedHistory.length,
-            real,
-            fake,
-            unverified,
-            avgConfidence: Math.round(avgConfidence),
-          })
-        }
-      } catch (error) {
-        console.error("Error loading history:", error)
-      } finally {
-        setLoading(false)
-      }
+      setStats({
+        total: savedHistory.length,
+        real,
+        fake,
+        unverified,
+        avgConfidence: Math.round(avgConfidence),
+      })
     }
 
-    fetchHistory()
+    setLoading(false)
   }, [])
 
   const handleSelect = (id: string) => {
@@ -184,25 +190,9 @@ function HistoryTab() {
     setHistory(updatedHistory)
     setSelectedItems([])
     setSelectAll(false)
-
-    const real = updatedHistory.filter((d) => d.verdict === "REAL").length
-    const fake = updatedHistory.filter((d) => d.verdict === "FAKE").length
-    const unverified = updatedHistory.filter((d) => d.verdict === "UNVERIFIED").length
-    const avgConfidence =
-      updatedHistory.reduce((sum: number, d: HistoryItem) => sum + d.confidence_score, 0) / (updatedHistory.length || 1)
-
-    setStats({
-      total: updatedHistory.length,
-      real,
-      fake,
-      unverified,
-      avgConfidence: Math.round(avgConfidence),
-    })
   }
 
-  if (loading) {
-    return <div className="text-center py-8">Loading history...</div>
-  }
+  if (loading) return <div className="text-center py-8">Loading history...</div>
 
   if (history.length === 0) {
     return (
@@ -239,22 +229,34 @@ function HistoryTab() {
         </div>
 
         <div className="grid grid-cols-4 gap-4">
-          <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg">
+          <button
+            onClick={() => setStatsModalOpen(true)}
+            className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+          >
             <div className="text-3xl font-bold text-blue-600">{stats.total}</div>
             <div className="text-sm text-muted-foreground">Total</div>
-          </div>
-          <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg">
+          </button>
+          <button
+            onClick={() => setStatsModalOpen(true)}
+            className="bg-green-50 dark:bg-green-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+          >
             <div className="text-3xl font-bold text-green-600">{stats.real}</div>
             <div className="text-sm text-muted-foreground">Real</div>
-          </div>
-          <div className="bg-red-50 dark:bg-red-950 p-4 rounded-lg">
+          </button>
+          <button
+            onClick={() => setStatsModalOpen(true)}
+            className="bg-red-50 dark:bg-red-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+          >
             <div className="text-3xl font-bold text-red-600">{stats.fake}</div>
             <div className="text-sm text-muted-foreground">Fake</div>
-          </div>
-          <div className="bg-yellow-50 dark:bg-yellow-950 p-4 rounded-lg">
+          </button>
+          <button
+            onClick={() => setStatsModalOpen(true)}
+            className="bg-yellow-50 dark:bg-yellow-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
+          >
             <div className="text-3xl font-bold text-yellow-600">{stats.avgConfidence}%</div>
-            <div className="text-sm text-muted-foreground">Avg Confidence</div>
-          </div>
+            <div className="text-sm text-muted-foreground">Unverified</div>
+          </button>
         </div>
       </Card>
 
@@ -271,7 +273,7 @@ function HistoryTab() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-start gap-2 mb-3">
                   <p className="font-semibold line-clamp-2 text-foreground wrap-break-words">
-                    {item.input_type === "file" ? item.fileName || "File" : item.content_preview}
+                    {item.content_preview}
                   </p>
                 </div>
 
@@ -287,7 +289,7 @@ function HistoryTab() {
                   <span>•</span>
                   <div className="flex items-center gap-1">
                     <span className="uppercase text-xs font-medium">
-                      {item.input_type === "file" ? "FILE" : item.input_type === "url" ? "URL" : "TEXT"}
+                      {item.input_type === "url" ? "URL" : "TEXT"}
                     </span>
                   </div>
                 </div>
@@ -314,6 +316,8 @@ function HistoryTab() {
           </Card>
         ))}
       </div>
+
+      <HistoryStatsModal isOpen={statsModalOpen} onClose={() => setStatsModalOpen(false)} stats={stats} />
     </div>
   )
 }
