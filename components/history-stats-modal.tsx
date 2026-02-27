@@ -47,21 +47,24 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
 
   const verdictStats = [
     {
-      label: "REAL",
+      label: "High Credibility",
+      verdict: "REAL",
       count: stats.real,
       color: "bg-green-100 dark:bg-green-900/30",
       textColor: "text-green-700 dark:text-green-400",
       borderColor: "border-green-200 dark:border-green-800",
     },
     {
-      label: "FAKE",
+      label: "Low Credibility",
+      verdict: "FAKE",
       count: stats.fake,
       color: "bg-red-100 dark:bg-red-900/30",
       textColor: "text-red-700 dark:text-red-400",
       borderColor: "border-red-200 dark:border-red-800",
     },
     {
-      label: "UNVERIFIED",
+      label: "Moderate Credibility",
+      verdict: "UNVERIFIED",
       count: stats.unverified,
       color: "bg-yellow-100 dark:bg-yellow-900/30",
       textColor: "text-yellow-700 dark:text-yellow-400",
@@ -73,7 +76,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>Analysis History</DialogTitle>
+          <DialogTitle>Credibility Assessment History</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto pr-4 space-y-6">
@@ -82,30 +85,30 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
             <div className="grid grid-cols-2 gap-8 text-center">
               <div>
                 <div className="text-5xl font-bold text-foreground mb-2">{stats.total}</div>
-                <div className="text-sm text-muted-foreground">Total Analyses</div>
+                <div className="text-sm text-muted-foreground">Total Assessments</div>
               </div>
               <div>
                 <div className="text-5xl font-bold text-blue-600 dark:text-blue-400 mb-2">{stats.avgConfidence}%</div>
-                <div className="text-sm text-muted-foreground">Average Confidence</div>
+                <div className="text-sm text-muted-foreground">Average Credibility Score</div>
               </div>
             </div>
           </div>
 
           <div className="space-y-4">
-            <h4 className="font-semibold text-foreground text-base">Click to view all content:</h4>
+            <h4 className="font-semibold text-foreground text-base">Click to view assessments by credibility:</h4>
             <div className="grid grid-cols-3 gap-4">
               {verdictStats.map((item) => (
                 <button
-                  key={item.label}
-                  onClick={() => handleVerdictClick(item.label as "REAL" | "FAKE" | "UNVERIFIED")}
+                  key={item.verdict}
+                  onClick={() => handleVerdictClick(item.verdict as "REAL" | "FAKE" | "UNVERIFIED")}
                   className={`p-6 rounded-lg border-2 transition-all cursor-pointer ${
-                    activeFilter === item.label
+                    activeFilter === item.verdict
                       ? `${item.color} ${item.borderColor} border-2`
                       : `bg-muted/30 border-border hover:border-foreground/30`
                   }`}
                 >
                   <div
-                    className={`text-3xl font-bold ${activeFilter === item.label ? item.textColor : "text-foreground"}`}
+                    className={`text-3xl font-bold ${activeFilter === item.verdict ? item.textColor : "text-foreground"}`}
                   >
                     {item.count}
                   </div>
@@ -118,7 +121,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
           {activeFilter && filteredHistory.length > 0 && (
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground text-base">
-                {activeFilter} Content ({filteredHistory.length})
+                {verdictStats.find(s => s.verdict === activeFilter)?.label} Content ({filteredHistory.length})
               </h4>
               <div className="space-y-2 max-h-[45vh] overflow-y-auto border rounded-lg p-3 bg-muted/10">
                 {filteredHistory.map((item) => (
@@ -147,7 +150,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
 
           {activeFilter && filteredHistory.length === 0 && (
             <div className="p-6 bg-muted/50 rounded-lg text-center">
-              <p className="text-sm text-muted-foreground">No {activeFilter} analyses found</p>
+              <p className="text-sm text-muted-foreground">No assessments found in this credibility category</p>
             </div>
           )}
         </div>

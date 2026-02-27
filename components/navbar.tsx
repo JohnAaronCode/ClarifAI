@@ -35,7 +35,7 @@ export default function Navbar() {
         </div>
         <div>
           <h1 className="font-bold text-slate-900 dark:text-white">ClarifAI</h1>
-          <p className="text-xs text-muted-foreground dark:text-slate-400">Fake News Detector</p>
+          <p className="text-xs text-muted-foreground dark:text-slate-400">News Credibility Analyzer</p>
         </div>
       </div>
 

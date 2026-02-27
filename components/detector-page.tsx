@@ -33,6 +33,19 @@ interface HistoryItem {
   created_at: string
 }
 
+function getCredibilityLabel(verdict: string): string {
+  switch (verdict) {
+    case "REAL":
+      return "High Credibility"
+    case "FAKE":
+      return "Low Credibility"
+    case "UNVERIFIED":
+      return "Moderate Credibility"
+    default:
+      return verdict
+  }
+}
+
 export default function DetectorPage() {
   const [activeTab, setActiveTab] = useState("detector")
   const [loading, setLoading] = useState(false)
@@ -103,19 +116,19 @@ export default function DetectorPage() {
       <main className="max-w-4xl mx-auto px-4 py-8 flex-1 w-full">
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2 text-center">ClarifAI</h1>
-          <p className="text-center text-muted-foreground">Fake News Detector</p>
+          <p className="text-center text-muted-foreground">News Credibility Analyzer</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="detector">Detector</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="detector">Content Credibility Analysis</TabsTrigger>
+            <TabsTrigger value="history">Analysis History</TabsTrigger>
           </TabsList>
 
           <TabsContent value="detector" className="space-y-6">
             <Card className="p-6">
-              <h2 className="text-2xl font-semibold mb-2">Verify News Accuracy</h2>
-              <p className="text-muted-foreground mb-6">Enter a news article or URL to check if it's real or fake.</p>
+              <h2 className="text-2xl font-semibold mb-2 text-center">Article Credibility Assessment</h2>
+              <p className="text-muted-foreground mb-6 text-center">Submit a news article or URL for credibility assessment and detailed analysis.</p>
 
               <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
             </Card>
@@ -198,7 +211,7 @@ function HistoryTab() {
     return (
       <Card className="p-12">
         <div className="text-center">
-          <p className="text-muted-foreground text-lg">No analysis history yet. Start by analyzing some content!</p>
+          <p className="text-muted-foreground text-lg">No assessment history yet. Start by assessing some content!</p>
         </div>
       </Card>
     )
@@ -209,8 +222,8 @@ function HistoryTab() {
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">Analysis History</h2>
-            <div className="text-sm text-muted-foreground mt-1">{stats.total} total analyses</div>
+            <h2 className="text-2xl font-semibold">Credibility Assessment History</h2>
+            <div className="text-sm text-muted-foreground mt-1">{stats.total} total assessments</div>
           </div>
           <div className="flex gap-3">
             <button
@@ -241,21 +254,21 @@ function HistoryTab() {
             className="bg-green-50 dark:bg-green-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
           >
             <div className="text-3xl font-bold text-green-600">{stats.real}</div>
-            <div className="text-sm text-muted-foreground">Real</div>
+            <div className="text-sm text-muted-foreground">High Credibility</div>
           </button>
           <button
             onClick={() => setStatsModalOpen(true)}
             className="bg-red-50 dark:bg-red-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
           >
             <div className="text-3xl font-bold text-red-600">{stats.fake}</div>
-            <div className="text-sm text-muted-foreground">Fake</div>
+            <div className="text-sm text-muted-foreground">Low Credibility</div>
           </button>
           <button
             onClick={() => setStatsModalOpen(true)}
             className="bg-yellow-50 dark:bg-yellow-950 p-4 rounded-lg hover:shadow-md transition-shadow cursor-pointer"
           >
-            <div className="text-3xl font-bold text-yellow-600">{stats.avgConfidence}%</div>
-            <div className="text-sm text-muted-foreground">Unverified</div>
+            <div className="text-3xl font-bold text-yellow-600">{stats.unverified}</div>
+            <div className="text-sm text-muted-foreground">Moderate Credibility</div>
           </button>
         </div>
       </Card>
@@ -305,11 +318,11 @@ function HistoryTab() {
                         : "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-600"
                   }`}
                 >
-                  {item.verdict}
+                  {getCredibilityLabel(item.verdict)}
                 </div>
                 <div className="flex items-center gap-1 justify-end">
                   <span className="text-xl font-bold text-foreground">{item.confidence_score}%</span>
-                  <span className="text-xs text-muted-foreground">confidence</span>
+                  <span className="text-xs text-muted-foreground">credibility</span>
                 </div>
               </div>
             </div>

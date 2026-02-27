@@ -82,6 +82,157 @@ function extractTextFromHTML(html: string): string {
   return text
 }
 
+function detectMeaninglessContent(content: string): { isMeaningless: boolean; reason: string; score: number } {
+  const trimmed = content.trim()
+  const words = trimmed.toLowerCase().split(/\s+/).filter((w) => w.length > 0)
+  const sentences = trimmed.split(/[.!?]+/).filter((s) => s.trim().length > 0)
+
+  let meaningfulnessScore = 100
+
+  // 1. Check for excessive punctuation (sign of gibberish)
+  const punctuationRatio = (trimmed.match(/[!?]{2,}|\.{2,}/g) || []).length * 5
+  if (punctuationRatio > 20) {
+    meaningfulnessScore -= 30
+  }
+
+  // 2. Check for random capitalization (MixedCAsE patterns)
+  const oddCapitalizations = (trimmed.match(/[a-z][A-Z][a-z]/g) || []).length
+  if (oddCapitalizations > words.length * 0.2) {
+    meaningfulnessScore -= 25
+  }
+
+  // 3. Average sentence length too short (fragmented gibberish)
+  const avgSentenceLength = words.length / Math.max(sentences.length, 1)
+  if (avgSentenceLength < 3 && words.length > 20) {
+    meaningfulnessScore -= 20
+  }
+
+  // 4. Excessive filler words (the, a, and, or, etc.)
+  const fillerWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'to', 'of', 'in', 'at', 'on', 'by'])
+  let fillerCount = 0
+  for (const word of words) {
+    if (fillerWords.has(word)) {
+      fillerCount++
+    }
+  }
+  const fillerRatio = fillerCount / words.length
+  if (fillerRatio > 0.5) {
+    meaningfulnessScore -= 25
+  }
+
+  // 5. Check for unsubstantiated superlatives and spam phrases
+  const spamPhrases = [
+    'best', 'amazing', 'incredible', 'incredible', 'absolutely', 'definitely', 'certainly',
+    'extremely', 'very', 'really', 'so', 'most', 'must', 'should', 'would'
+  ]
+  const lowercaseContent = trimmed.toLowerCase()
+  let superlativeCount = 0
+  for (const phrase of spamPhrases) {
+    superlativeCount += (lowercaseContent.match(new RegExp(phrase, 'g')) || []).length
+  }
+  if (superlativeCount > words.length * 0.15) {
+    meaningfulnessScore -= 20
+  }
+
+  // 6. Check for nonsense letter patterns (repeated vowels or consonants)
+  const nonsensePatterns = (trimmed.match(/([a-z])\1{2,}/g) || []).length
+  if (nonsensePatterns > 5) {
+    meaningfulnessScore -= 30
+  }
+
+  // 7. Check for keyboard mashing patterns (random special chars or excessive numbers)
+  const randomSpecialChars = (trimmed.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{2,}/g) || []).length
+  if (randomSpecialChars > 3) {
+    meaningfulnessScore -= 25
+  }
+
+  // 8. Check for all caps or all lowercase tendencies
+  const uppercase = (trimmed.match(/[A-Z]/g) || []).length
+  const lowercase = (trimmed.match(/[a-z]/g) || []).length
+  if (uppercase === 0 || lowercase === 0) {
+    meaningfulnessScore -= 15
+  }
+
+  // 9. Coherence check: transitional words and logical connectors
+  const transitionWords = [
+    'however', 'therefore', 'thus', 'meanwhile', 'furthermore', 'moreover',
+    'consequently', 'accordingly', 'subsequently', 'likewise', 'similarly',
+    'instead', 'otherwise', 'rather', 'namely', 'indeed', 'also', 'because'
+  ]
+  const transitionCount = transitionWords.filter(word => lowercaseContent.includes(word)).length
+  if (transitionCount === 0 && words.length > 100) {
+    meaningfulnessScore -= 10
+  }
+
+  // 10. Word diversity check (too many repeated single words)
+  const uniqueWords = new Set(words)
+  const diversityRatio = uniqueWords.size / words.length
+  if (diversityRatio < 0.3) {
+    meaningfulnessScore -= 15
+  }
+
+  // Ensure score stays between 0-100
+  meaningfulnessScore = Math.max(0, Math.min(100, meaningfulnessScore))
+
+  if (meaningfulnessScore < 30) {
+    return {
+      isMeaningless: true,
+      reason: "Content appears to be random, nonsensical, or gibberish. Please provide meaningful, coherent text for analysis.",
+      score: meaningfulnessScore
+    }
+  }
+
+  return { isMeaningless: false, reason: "", score: meaningfulnessScore }
+}
+
+function detectRepetitiveContent(content: string): { isRepetitive: boolean; reason: string } {
+  const words = content.toLowerCase().split(/\s+/).filter((w) => w.length > 0)
+  const uniqueWords = new Set(words)
+  const uniqueRatio = uniqueWords.size / words.length
+
+  // Check if less than 40% unique words (indicates spam/repetition)
+  if (uniqueRatio < 0.4) {
+    return { isRepetitive: true, reason: "Content appears to be repetitive or spammy. Unique word ratio is too low." }
+  }
+
+  // Check for single word dominance (if one word appears > 30% of time)
+  const wordFreq = new Map<string, number>()
+  for (const word of words) {
+    wordFreq.set(word, (wordFreq.get(word) || 0) + 1)
+  }
+
+  let maxFreq = 0
+  let maxWord = ""
+  for (const [word, freq] of wordFreq.entries()) {
+    if (freq > maxFreq && word.length > 2) {
+      maxFreq = freq
+      maxWord = word
+    }
+  }
+
+  if (maxFreq > 0 && maxFreq / words.length > 0.3) {
+    return { isRepetitive: true, reason: `Content is overly repetitive with the word "${maxWord}" appearing excessively.` }
+  }
+
+  // Check phrase-level repetition (sliding window)
+  const phrases = new Set<string>()
+  const repeatedPhrases = new Set<string>()
+  const windowSize = 3
+  for (let i = 0; i < words.length - windowSize + 1; i++) {
+    const phrase = words.slice(i, i + windowSize).join(" ")
+    if (phrases.has(phrase)) {
+      repeatedPhrases.add(phrase)
+    }
+    phrases.add(phrase)
+  }
+
+  if (repeatedPhrases.size > words.length / 20) {
+    return { isRepetitive: true, reason: "Content contains excessive phrase repetition, suggesting fabricated or template-based text." }
+  }
+
+  return { isRepetitive: false, reason: "" }
+}
+
 function validateContent(content: string, type: string): { isValid: boolean; message: string } {
   const trimmed = content.trim()
   const hasLetters = /[a-zA-Z]/.test(trimmed)
@@ -100,6 +251,18 @@ function validateContent(content: string, type: string): { isValid: boolean; mes
       isValid: false,
       message: "Please provide meaningful content to proceed.",
     }
+  }
+
+  // Check for meaningless/nonsensical content BEFORE other checks
+  const meaningfulnessCheck = detectMeaninglessContent(trimmed)
+  if (meaningfulnessCheck.isMeaningless) {
+    return { isValid: false, message: meaningfulnessCheck.reason }
+  }
+
+  // Check for repetitive/spammy content
+  const repetitionCheck = detectRepetitiveContent(trimmed)
+  if (repetitionCheck.isRepetitive) {
+    return { isValid: false, message: repetitionCheck.reason }
   }
 
   return { isValid: true, message: "" }

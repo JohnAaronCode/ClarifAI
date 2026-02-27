@@ -28,6 +28,43 @@ interface ResultsDisplayProps {
 export default function ResultsDisplay({ result, inputContent }: ResultsDisplayProps) {
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
 
+  // Handle ERROR verdict early
+  if (result.verdict === "ERROR") {
+    return (
+      <Card className="p-6 bg-orange-50 dark:bg-orange-950 border-2 border-orange-200 dark:border-orange-800">
+        <div className="flex items-start gap-4">
+          <div className="text-orange-600 dark:text-orange-400 shrink-0">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-2xl font-bold text-orange-600 dark:text-orange-400 mb-2">Unable to Process</h3>
+            <p className="text-sm text-muted-foreground mb-4">{result.explanation}</p>
+            <div className="bg-orange-100 dark:bg-orange-900/30 rounded-lg p-4 border border-orange-200 dark:border-orange-800">
+              <p className="text-sm font-medium text-orange-900 dark:text-orange-200 mb-2">What you can try:</p>
+              <ul className="text-sm text-orange-800 dark:text-orange-300 space-y-1 list-disc list-inside">
+                <li>Check that your content is valid and properly formatted</li>
+                <li>Ensure URLs are accessible and contain article content</li>
+                <li>Avoid overly repetitive or template-like content</li>
+                <li>Provide meaningful text with varied language</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  const getVerdictLabel = () => {
+    switch (result.verdict) {
+      case "REAL":
+        return "High Credibility"
+      case "FAKE":
+        return "Low Credibility"
+      default:
+        return "Moderate Credibility"
+    }
+  }
+
   const getVerdictColor = () => {
     switch (result.verdict) {
       case "REAL":
@@ -66,7 +103,7 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
       case "REAL":
         return <CheckCircle2 className="w-6 h-6" />
       case "FAKE":
-        return <AlertTriangle className="w-6 h-6" />
+        return <AlertCircle className="w-6 h-6" />
       default:
         return <AlertCircle className="w-6 h-6" />
     }
@@ -117,14 +154,6 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
 
   const scores = getVerdictBasedScores()
 
-  if (result.verdict === "ERROR") {
-    return (
-      <div className="text-center py-8">
-        <p className="text-red-600 dark:text-red-400 text-base font-medium">{result.explanation}</p>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-4">
       {/* Main Verdict Card */}
@@ -132,8 +161,8 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
         <div className="flex items-start gap-4">
           <div className={`${getVerdictTextColor()} shrink-0`}>{getVerdictIcon()}</div>
           <div className="flex-1">
-            <h3 className={`text-2xl font-bold ${getVerdictTextColor()} mb-2`}>{result.verdict}</h3>
-            <p className="text-sm text-muted-foreground mb-3">Confidence: {result.confidence_score}%</p>
+            <h3 className={`text-2xl font-bold ${getVerdictTextColor()} mb-2`}>{getVerdictLabel()}</h3>
+            <p className="text-sm text-muted-foreground mb-3">Credibility Score: {result.confidence_score}%</p>
 
             <div className="w-full bg-gray-300 dark:bg-gray-700 rounded-full h-2 mb-4 overflow-hidden">
               <div
@@ -143,7 +172,7 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
             </div>
 
             <div>
-              <p className="text-sm text-foreground font-medium mb-2">Why this result:</p>
+              <p className="text-sm text-foreground font-medium mb-2">Credibility Assessment:</p>
               <p className="text-sm text-foreground">{result.explanation}</p>
             </div>
           </div>
@@ -159,7 +188,7 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
         <Card className="p-6 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
           <h4 className="font-semibold mb-4 text-green-900 dark:text-green-300 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4" />
-            Verified Sources Confirming This
+            Suggested Trusted Sources for Cross-Verification
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {result.source_links.map((src, idx) => (
@@ -184,7 +213,7 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
         <Card className="p-6 bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-700">
           <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">
             <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            Verified News Sources to Check
+            Suggested Trusted Sources for Cross-Verification
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
             {result.source_links.map((src, idx) => (
@@ -270,7 +299,7 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
       {/* Fact-Check Results */}
       {result.fact_check_results && result.fact_check_results.length > 0 && (
         <Card className="p-6 bg-card dark:bg-slate-800 border dark:border-slate-700">
-          <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">Fact-Check Reference</h4>
+          <h4 className="font-semibold mb-4 text-foreground flex items-center gap-2">Related Fact-Check Results</h4>
           <div className="space-y-4">
             {result.fact_check_results.slice(0, 4).map((check: any, idx: number) => {
               const validLink =
