@@ -27,7 +27,7 @@ export default function Navbar() {
   }
 
   return (
-  <nav className="border-b border-slate-200 dark:border-slate-700 bg-card bg-white dark:bg-slate-800/50">
+  <nav className="border-b border-slate-200 dark:border-slate-700 bg-card dark:bg-slate-800/50">
     <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white">

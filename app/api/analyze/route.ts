@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { analyzeSentimentWithTransformers, extractEntitiesWithNER, ensembleAnalysis } from "@/lib/ml-utils"
+import { ensembleAnalysis } from "@/lib/ml-utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const analysis = await analyzeContentWithDualEngine(processedContent, type, fileName)
+    const analysis = await analyzeContentWithDualEngine(processedContent, type, fileName, content)
     return NextResponse.json(analysis)
   } catch (error) {
     console.error("Analysis error:", error)
@@ -89,40 +89,25 @@ function detectMeaninglessContent(content: string): { isMeaningless: boolean; re
 
   let meaningfulnessScore = 100
 
-  // 1. Check for excessive punctuation (sign of gibberish)
   const punctuationRatio = (trimmed.match(/[!?]{2,}|\.{2,}/g) || []).length * 5
-  if (punctuationRatio > 20) {
-    meaningfulnessScore -= 30
-  }
+  if (punctuationRatio > 20) meaningfulnessScore -= 30
 
-  // 2. Check for random capitalization (MixedCAsE patterns)
   const oddCapitalizations = (trimmed.match(/[a-z][A-Z][a-z]/g) || []).length
-  if (oddCapitalizations > words.length * 0.2) {
-    meaningfulnessScore -= 25
-  }
+  if (oddCapitalizations > words.length * 0.2) meaningfulnessScore -= 25
 
-  // 3. Average sentence length too short (fragmented gibberish)
   const avgSentenceLength = words.length / Math.max(sentences.length, 1)
-  if (avgSentenceLength < 3 && words.length > 20) {
-    meaningfulnessScore -= 20
-  }
+  if (avgSentenceLength < 3 && words.length > 20) meaningfulnessScore -= 20
 
-  // 4. Excessive filler words (the, a, and, or, etc.)
   const fillerWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'is', 'are', 'to', 'of', 'in', 'at', 'on', 'by'])
   let fillerCount = 0
   for (const word of words) {
-    if (fillerWords.has(word)) {
-      fillerCount++
-    }
+    if (fillerWords.has(word)) fillerCount++
   }
   const fillerRatio = fillerCount / words.length
-  if (fillerRatio > 0.5) {
-    meaningfulnessScore -= 25
-  }
+  if (fillerRatio > 0.5) meaningfulnessScore -= 25
 
-  // 5. Check for unsubstantiated superlatives and spam phrases
   const spamPhrases = [
-    'best', 'amazing', 'incredible', 'incredible', 'absolutely', 'definitely', 'certainly',
+    'best', 'amazing', 'incredible', 'absolutely', 'definitely', 'certainly',
     'extremely', 'very', 'really', 'so', 'most', 'must', 'should', 'would'
   ]
   const lowercaseContent = trimmed.toLowerCase()
@@ -130,48 +115,30 @@ function detectMeaninglessContent(content: string): { isMeaningless: boolean; re
   for (const phrase of spamPhrases) {
     superlativeCount += (lowercaseContent.match(new RegExp(phrase, 'g')) || []).length
   }
-  if (superlativeCount > words.length * 0.15) {
-    meaningfulnessScore -= 20
-  }
+  if (superlativeCount > words.length * 0.15) meaningfulnessScore -= 20
 
-  // 6. Check for nonsense letter patterns (repeated vowels or consonants)
   const nonsensePatterns = (trimmed.match(/([a-z])\1{2,}/g) || []).length
-  if (nonsensePatterns > 5) {
-    meaningfulnessScore -= 30
-  }
+  if (nonsensePatterns > 5) meaningfulnessScore -= 30
 
-  // 7. Check for keyboard mashing patterns (random special chars or excessive numbers)
   const randomSpecialChars = (trimmed.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{2,}/g) || []).length
-  if (randomSpecialChars > 3) {
-    meaningfulnessScore -= 25
-  }
+  if (randomSpecialChars > 3) meaningfulnessScore -= 25
 
-  // 8. Check for all caps or all lowercase tendencies
   const uppercase = (trimmed.match(/[A-Z]/g) || []).length
   const lowercase = (trimmed.match(/[a-z]/g) || []).length
-  if (uppercase === 0 || lowercase === 0) {
-    meaningfulnessScore -= 15
-  }
+  if (uppercase === 0 || lowercase === 0) meaningfulnessScore -= 15
 
-  // 9. Coherence check: transitional words and logical connectors
   const transitionWords = [
     'however', 'therefore', 'thus', 'meanwhile', 'furthermore', 'moreover',
     'consequently', 'accordingly', 'subsequently', 'likewise', 'similarly',
     'instead', 'otherwise', 'rather', 'namely', 'indeed', 'also', 'because'
   ]
   const transitionCount = transitionWords.filter(word => lowercaseContent.includes(word)).length
-  if (transitionCount === 0 && words.length > 100) {
-    meaningfulnessScore -= 10
-  }
+  if (transitionCount === 0 && words.length > 100) meaningfulnessScore -= 10
 
-  // 10. Word diversity check (too many repeated single words)
   const uniqueWords = new Set(words)
   const diversityRatio = uniqueWords.size / words.length
-  if (diversityRatio < 0.3) {
-    meaningfulnessScore -= 15
-  }
+  if (diversityRatio < 0.3) meaningfulnessScore -= 15
 
-  // Ensure score stays between 0-100
   meaningfulnessScore = Math.max(0, Math.min(100, meaningfulnessScore))
 
   if (meaningfulnessScore < 30) {
@@ -190,12 +157,10 @@ function detectRepetitiveContent(content: string): { isRepetitive: boolean; reas
   const uniqueWords = new Set(words)
   const uniqueRatio = uniqueWords.size / words.length
 
-  // Check if less than 40% unique words (indicates spam/repetition)
   if (uniqueRatio < 0.4) {
     return { isRepetitive: true, reason: "Content appears to be repetitive or spammy. Unique word ratio is too low." }
   }
 
-  // Check for single word dominance (if one word appears > 30% of time)
   const wordFreq = new Map<string, number>()
   for (const word of words) {
     wordFreq.set(word, (wordFreq.get(word) || 0) + 1)
@@ -214,15 +179,12 @@ function detectRepetitiveContent(content: string): { isRepetitive: boolean; reas
     return { isRepetitive: true, reason: `Content is overly repetitive with the word "${maxWord}" appearing excessively.` }
   }
 
-  // Check phrase-level repetition (sliding window)
   const phrases = new Set<string>()
   const repeatedPhrases = new Set<string>()
   const windowSize = 3
   for (let i = 0; i < words.length - windowSize + 1; i++) {
     const phrase = words.slice(i, i + windowSize).join(" ")
-    if (phrases.has(phrase)) {
-      repeatedPhrases.add(phrase)
-    }
+    if (phrases.has(phrase)) repeatedPhrases.add(phrase)
     phrases.add(phrase)
   }
 
@@ -247,130 +209,163 @@ function validateContent(content: string, type: string): { isValid: boolean; mes
 
   const wordCount = trimmed.split(/\s+/).length
   if (wordCount < 5) {
-    return {
-      isValid: false,
-      message: "Please provide meaningful content to proceed.",
-    }
+    return { isValid: false, message: "Please provide meaningful content to proceed." }
   }
 
-  // Check for meaningless/nonsensical content BEFORE other checks
   const meaningfulnessCheck = detectMeaninglessContent(trimmed)
   if (meaningfulnessCheck.isMeaningless) {
     return { isValid: false, message: meaningfulnessCheck.reason }
   }
 
-  // Check for repetitive/spammy content
-  const repetitionCheck = detectRepetitiveContent(trimmed)
-  if (repetitionCheck.isRepetitive) {
-    return { isValid: false, message: repetitionCheck.reason }
+  // Skip repetition check for URL-fetched content — extracted HTML is naturally
+  // repetitive (nav bars, footers, repeated headings). Only check raw pasted text.
+  if (type !== "url") {
+    const repetitionCheck = detectRepetitiveContent(trimmed)
+    if (repetitionCheck.isRepetitive) {
+      return { isValid: false, message: repetitionCheck.reason }
+    }
   }
 
   return { isValid: true, message: "" }
 }
 
-async function analyzeContentWithDualEngine(content: string, type: string, fileName?: string) {
-  const hfApiKey = process.env.HUGGINGFACE_API_KEY
-  const openaiApiKey = process.env.OPENAI_API_KEY
+// Build a source search URL with clean encoding (spaces as +, not %20)
+function buildSourceSearchUrl(sourceDomain: string, query: string): string {
+  // Use + for spaces — most search engines handle this better than %20
+  const clean = query.substring(0, 80).trim()
+  const encoded = clean.split(/\s+/).map(encodeURIComponent).join("+")
 
-  // --- Heuristic / rule-based analysis ---
+  const searchUrlMap: Record<string, string> = {
+    "rappler.com":        `https://www.rappler.com/search?q=${encoded}`,
+    "gmanetwork.com":     `https://www.gmanetwork.com/news/search?q=${encoded}`,
+    "abs-cbn.com":        `https://news.abs-cbn.com/search?q=${encoded}`,
+    "inquirer.net":       `https://www.inquirer.net/search?q=${encoded}`,
+    "philstar.com":       `https://www.philstar.com/search?q=${encoded}`,
+    "manilatimes.net":    `https://www.manilatimes.net/search?q=${encoded}`,
+    "mb.com.ph":          `https://mb.com.ph/search?s=${encoded}`,
+    "cnnphilippines.com": `https://www.cnnphilippines.com/search?q=${encoded}`,
+    "bbc.com":            `https://www.bbc.co.uk/search?q=${encoded}`,
+    "reuters.com":        `https://www.reuters.com/search/news?blob=${encoded}`,
+    "apnews.com":         `https://apnews.com/search?q=${encoded}`,
+    "cnn.com":            `https://edition.cnn.com/search?q=${encoded}`,
+    "theguardian.com":    `https://www.theguardian.com/search?q=${encoded}`,
+    "nytimes.com":        `https://www.nytimes.com/search?query=${encoded}`,
+    "washingtonpost.com": `https://www.washingtonpost.com/search/?query=${encoded}`,
+    "bloomberg.com":      `https://www.bloomberg.com/search?query=${encoded}`,
+    "aljazeera.com":      `https://www.aljazeera.com/search/${encoded}`,
+    "npr.org":            `https://www.npr.org/search?query=${encoded}`,
+    "cnbc.com":           `https://www.cnbc.com/search/?query=${encoded}`,
+    "foxnews.com":        `https://www.foxnews.com/search-results/search?q=${encoded}`,
+  }
+
+  const match = Object.entries(searchUrlMap).find(([domain]) => sourceDomain.includes(domain))
+  if (match) return match[1]
+
+  // Fallback: Google News scoped to that site
+  return `https://news.google.com/search?q=${encoded}+site:${sourceDomain}`
+}
+
+async function analyzeContentWithDualEngine(
+  content: string,
+  type: string,
+  fileName?: string,
+  originalInput?: string,
+) {
+  const openaiApiKey = process.env.OPENAI_API_KEY
+  const groqApiKey = process.env.GROQ_API_KEY
+
   const entities = extractEntitiesAdvanced(content)
   const claims = extractMainClaims(content)
-  const sourceAnalysis = analyzeSource(content, type)
+  const detectedTopics = detectTopicsFromContent(content.toLowerCase())
+  const phKeywordMatches = TOPIC_KEYWORDS.national.filter((kw) => content.toLowerCase().includes(kw)).length
+  const isPhilippinesContent = detectedTopics.includes("national") && phKeywordMatches >= 2
+  const sourceAnalysis = analyzeSource(content, type, originalInput)
   const factChecks = await generateFactChecksWithRealAPIs(content, claims)
   const clickbaitScore = detectClickbait(content)
   const credibilityPatterns = analyzeCredibilityPatterns(content)
+  // Try OpenAI for a precise search query; fall back to keyword extraction
+  const aiQuery = await buildAISearchQuery(content, openaiApiKey, groqApiKey)
+  const searchQuery = aiQuery || buildSearchQuery(content, claims)
+  console.log("[ClarifAI] Search query:", searchQuery)
 
-  // --- Ensemble ML analysis if API keys available ---
-  let ensembleResult: any = null
-  if (hfApiKey || openaiApiKey) {
-    console.log("[v0] Running dual-engine analysis (HF + OpenAI)...")
-    ensembleResult = await ensembleAnalysis(content, hfApiKey || "", openaiApiKey || "")
+  // ── Heuristic signals — computed first, passed to OpenAI as evidence ──────
+  const sentimentAnalysis = analyzeSentiment(content)
+
+  let reference = ""
+  if (sourceAnalysis.source) {
+    try {
+      const parsed = new URL(sourceAnalysis.source)
+      reference = buildSourceSearchUrl(parsed.hostname.replace("www.", ""), searchQuery)
+    } catch {
+      reference = sourceAnalysis.source
+    }
   }
 
-  // --- Sentiment analysis ---
-  let mlSentiment: any = null
-  if (hfApiKey) {
-    mlSentiment = await analyzeSentimentWithTransformers(content, hfApiKey)
-  }
-  const sentimentAnalysis = mlSentiment
-    ? {
-        score: mlSentiment.detailed_scores.positive - mlSentiment.detailed_scores.negative,
-        emotionalScore: mlSentiment.detailed_scores.negative,
-        label: mlSentiment.label,
-        ml_enhanced: true,
-      }
-    : analyzeSentiment(content)
+  // Use the first valid fact-check URL as reference if available
+  const bestFactCheck = factChecks.find((f: any) => f.source?.startsWith("http") && f.source !== "Source not identified")
+  if (bestFactCheck) reference = bestFactCheck.source
 
-  // --- NER entities (ML-based) ---
-  let mlEntities: any[] = []
-  if (hfApiKey) {
-    const nerResults = await extractEntitiesWithNER(content, hfApiKey)
-    mlEntities = nerResults
-      .map((entity: any) => ({
-        text: entity.word,
-        type: entity.entity_group,
-        score: entity.score,
-      }))
-      .slice(0, 8)
-  }
+  // ── Build evidence context to pass to OpenAI ──────────────────────────────
+  const evidence = buildEvidenceContext({
+    sourceAnalysis,
+    factChecks,
+    clickbaitScore,
+    credibilityPatterns,
+    sentimentAnalysis,
+    detectedTopics,
+  })
 
-  // --- Determine verdict and confidence ---
+  // ── OpenAI — synthesize verdict from all evidence ─────────────────────────
   let verdict: "REAL" | "FAKE" | "UNVERIFIED" = "UNVERIFIED"
   let confidence = 50
   let explanation = ""
-  let reference = sourceAnalysis.source || ""
+  let ensembleResult: any = null
 
-  if (ensembleResult) {
-    verdict = ensembleResult.primary_verdict as any
-    confidence = Math.min(ensembleResult.confidence_score, 99)
-
-    if (verdict === "FAKE" && confidence > 70) {
-      explanation = `Multiple suspicious patterns detected. ${clickbaitScore > 0.6 ? "The content uses sensationalized language. " : ""}Please verify with trusted sources.`
-    } else if (verdict === "REAL" && confidence > 75) {
-      explanation = `Content appears credible with professional structure. Cross-check with verified sources for confirmation.`
-    } else if (factChecks.length > 0 && factChecks[0].source !== "Source not identified") {
-      const bestFact = factChecks[0]
-      reference = bestFact.source
-      const conclusion = bestFact.conclusion.toLowerCase()
-
-      if (conclusion.includes("true") || conclusion.includes("correct") || conclusion.includes("accurate")) {
-        verdict = "REAL"
-        confidence = Math.min(96, 88 + sourceAnalysis.credibility * 10)
-        explanation = `Fact-checked and verified as accurate by ${bestFact.reviewer}. Multiple credibility signals confirm authenticity.`
-      } else if (conclusion.includes("false") || conclusion.includes("wrong")) {
-        verdict = "FAKE"
-        confidence = Math.min(98, 90 + sourceAnalysis.credibility * 10)
-        explanation = `Contains verifiable misinformation according to ${bestFact.reviewer}. Key claims contradict factual evidence.`
-      } else {
-        verdict = "UNVERIFIED"
-        confidence = 65
-        explanation = `Mixed findings detected. Unable to confirm authenticity. Recommend checking multiple sources.`
-      }
-    } else {
-      explanation = `Analysis inconclusive. Please cross-check with verified news sources for accurate information.`
-    }
-  } else if (
-    sourceAnalysis.credibility >= 0.9 &&
-    content.length > 300 &&
-    sentimentAnalysis.emotionalScore < 0.45 &&
-    credibilityPatterns.score > 0.8
-  ) {
-    verdict = "REAL"
-    confidence = 90
-    explanation = `Verified source with strong credibility indicators.`
-  } else if (sourceAnalysis.credibility < 0.35 && sentimentAnalysis.emotionalScore > 0.75 && clickbaitScore > 0.7) {
-    verdict = "FAKE"
-    confidence = 85
-    explanation = `High-risk content detected: Low credibility source + extreme emotional language + clickbait patterns.`
-  } else {
-    verdict = "UNVERIFIED"
-    confidence = Math.max(50, 55 + credibilityPatterns.score * 20)
-    explanation = credibilityPatterns.hasIssues
-      ? `Quality concerns found: ${credibilityPatterns.issues[0]}. Verify with trusted sources.`
-      : `Insufficient evidence to verify. Check multiple news outlets.`
+  if (groqApiKey || openaiApiKey) {
+    ensembleResult = await ensembleAnalysis(content, evidence, openaiApiKey || "", groqApiKey)
   }
 
-  // --- AWAIT async functions for detailed analysis ---
+  if (ensembleResult?.ml_signals) {
+    verdict     = ensembleResult.primary_verdict as any
+    confidence  = ensembleResult.confidence_score
+    explanation = ensembleResult.ml_signals.verdict_explanation || ""
+  } else {
+    // ── Heuristic fallback — only when OpenAI unavailable ────────────────────
+    const rawScore =
+      sourceAnalysis.credibility * 0.35 +
+      credibilityPatterns.score  * 0.30 +
+      (1 - Math.max(0, sentimentAnalysis.emotionalScore - 0.3)) * 0.15 +
+      (1 - clickbaitScore) * 0.15 +
+      Math.min(content.length / 2000, 0.1) * 0.05
+
+    confidence = Math.round(Math.min(rawScore * 100, 99))
+    if (rawScore >= 0.72)      verdict = "REAL"
+    else if (rawScore <= 0.38) verdict = "FAKE"
+    else                       verdict = "UNVERIFIED"
+
+    explanation = buildExplanation(verdict, {
+      sourceCredibility: sourceAnalysis.credibility,
+      emotionalScore: sentimentAnalysis.emotionalScore,
+      clickbaitScore,
+      credibilityPatterns,
+      hasFactCheck: !!bestFactCheck,
+    })
+  }
+
+  // Find trusted sources that have actually published related articles — via NewsAPI.
+  // Falls back to search-page links. Returns [] when nothing relevant found.
+  let analyzedDomain: string | null = null
+  if (type === "url" && originalInput) {
+    try { analyzedDomain = new URL(originalInput).hostname.replace("www.", "") } catch { /* ignore */ }
+  }
+  const enrichedSourceLinks = await findRelatedTrustedSources(
+    searchQuery,
+    analyzedDomain,
+    process.env.NEWS_API_KEY,
+    detectedTopics,
+    isPhilippinesContent,
+  )
+
   const sourceCredibility = await analyzeSourceCredibility(content, type, sourceAnalysis.credibility, verdict)
   const contentQuality = await analyzeContentQuality(content, verdict, confidence)
 
@@ -378,15 +373,12 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
   let adjustedContentQuality = contentQuality.overall_score
 
   if (verdict === "REAL") {
-    // REAL: credibility 70-100%, content quality 70-100%
     adjustedSourceCred = Math.max(0.7, Math.min(1, adjustedSourceCred))
     adjustedContentQuality = Math.max(0.7, Math.min(1, adjustedContentQuality))
   } else if (verdict === "FAKE") {
-    // FAKE: credibility 0-30%, content quality 0-40%
     adjustedSourceCred = Math.min(0.3, adjustedSourceCred)
     adjustedContentQuality = Math.min(0.4, adjustedContentQuality)
   } else if (verdict === "UNVERIFIED") {
-    // UNVERIFIED: credibility 30-50%, content quality 40-60%
     adjustedSourceCred = Math.max(0.3, Math.min(0.5, adjustedSourceCred))
     adjustedContentQuality = Math.max(0.4, Math.min(0.6, adjustedContentQuality))
   }
@@ -399,8 +391,12 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
     confidence_score: confidence,
     explanation,
     reference,
-    source_links: sourceAnalysis.detectedSources,
-    key_entities: mlEntities.length > 0 ? mlEntities : entities,
+    // ─── NEW: also expose a plain label for the reference link ───
+    reference_label: reference
+      ? `Search related articles on ${extractDomainLabel(reference)}`
+      : undefined,
+    source_links: enrichedSourceLinks,
+    key_entities: entities,
     sentiment_score: sentimentAnalysis.score,
     sentiment_label: sentimentAnalysis.label,
     source_credibility: Math.round(sourceAnalysis.credibility * 100),
@@ -410,38 +406,359 @@ async function analyzeContentWithDualEngine(content: string, type: string, fileN
     fact_check_results: factChecks,
     clickbait_score: clickbaitScore,
     file_name: fileName,
-    ml_enhanced: !!ensembleResult,
+    ml_enhanced: !!(ensembleResult?.ml_signals),  // true only when OpenAI returned full analysis
     ensemble_analysis: ensembleResult,
     source_credibility_detailed: sourceCredibility,
     content_quality_detailed: contentQuality,
+    // ─── NEW: expose the search query used for reference links ───
+    search_query: searchQuery,
+    detected_topics: detectedTopics,
+  }
+}
+
+// ── Build a human-readable explanation from actual measured signals ──────────
+// ── Build a structured evidence context string for OpenAI ─────────────────
+// This gives OpenAI real data to reason from instead of guessing
+function buildEvidenceContext(data: {
+  sourceAnalysis: { credibility: number; label: string; source: string }
+  factChecks: any[]
+  clickbaitScore: number
+  credibilityPatterns: { score: number; hasIssues: boolean; issues: string[] }
+  sentimentAnalysis: { emotionalScore: number; label: string }
+  detectedTopics: string[]
+}): string {
+  const lines: string[] = []
+
+  // Source credibility
+  const credPct = Math.round(data.sourceAnalysis.credibility * 100)
+  lines.push(`Source credibility: ${credPct}% — ${data.sourceAnalysis.label || "unknown source"}`)
+
+  // Detected topics
+  if (data.detectedTopics.length > 0) {
+    lines.push(`Detected topics: ${data.detectedTopics.join(", ")}`)
+  }
+
+  // Fact-check results
+  const validFactChecks = data.factChecks.filter(
+    (f: any) => f.source !== "Source not identified" && f.reviewer !== "Manual Verification Required"
+  )
+  if (validFactChecks.length > 0) {
+    lines.push(`Fact-check results (${validFactChecks.length} found):`)
+    validFactChecks.slice(0, 3).forEach((f: any) => {
+      lines.push(`  - "${f.claim.substring(0, 80)}..." → ${f.conclusion} (by ${f.reviewer})`)
+    })
+  } else {
+    lines.push("Fact-check results: No matching fact-checks found in external databases")
+  }
+
+  // Clickbait
+  const clickPct = Math.round(data.clickbaitScore * 100)
+  lines.push(`Clickbait/sensationalism score: ${clickPct}% — ${
+    clickPct > 60 ? "high — sensationalist language detected" :
+    clickPct > 30 ? "moderate" : "low — professional tone"
+  }`)
+
+  // Sentiment
+  lines.push(`Sentiment: ${data.sentimentAnalysis.label} (emotional score: ${Math.round(data.sentimentAnalysis.emotionalScore * 100)}%)`)
+
+  // Writing patterns
+  if (data.credibilityPatterns.hasIssues && data.credibilityPatterns.issues.length > 0) {
+    lines.push(`Writing quality issues: ${data.credibilityPatterns.issues.join("; ")}`)
+  } else {
+    lines.push("Writing quality: No major issues detected")
+  }
+
+  return lines.join("\n")
+}
+
+function buildExplanation(
+  verdict: "REAL" | "FAKE" | "UNVERIFIED",
+  signals: {
+    sourceCredibility: number
+    emotionalScore: number
+    clickbaitScore: number
+    credibilityPatterns: { score: number; hasIssues: boolean; issues: string[] }
+    hasFactCheck: boolean
+  },
+): string {
+  const { sourceCredibility, emotionalScore, clickbaitScore, credibilityPatterns, hasFactCheck } = signals
+  const reasons: string[] = []
+
+  if (verdict === "REAL") {
+    if (sourceCredibility >= 0.85) reasons.push("published by a highly credible source")
+    else if (sourceCredibility >= 0.65) reasons.push("source has a good credibility record")
+    if (emotionalScore < 0.25) reasons.push("written in a neutral, objective tone")
+    if (clickbaitScore < 0.2) reasons.push("no sensationalist language detected")
+    if (hasFactCheck) reasons.push("at least one claim was verified by a fact-checker")
+    if (credibilityPatterns.score > 0.75) reasons.push("strong writing structure and credibility patterns")
+
+    if (reasons.length === 0) return "The article shows overall credible indicators based on available signals."
+    return `This article appears credible. It is ${reasons.slice(0, -1).join(", ")}${reasons.length > 1 ? ", and " : ""}${reasons[reasons.length - 1]}.`
+  }
+
+  if (verdict === "FAKE") {
+    if (clickbaitScore > 0.6) reasons.push("uses sensationalist or clickbait language")
+    if (emotionalScore > 0.65) reasons.push("the tone is highly emotional rather than factual")
+    if (sourceCredibility < 0.35) reasons.push("the source has a low credibility rating")
+    if (credibilityPatterns.issues.includes("No citations or evidence references")) reasons.push("no sources or evidence are cited")
+    if (credibilityPatterns.issues.some(i => i.includes("ALL CAPS"))) reasons.push("contains multiple all-caps phrases")
+    if (credibilityPatterns.issues.some(i => i.includes("Vague"))) reasons.push("relies on vague, unattributed claims")
+
+    if (reasons.length === 0) return "The article shows several signs of unreliable or misleading content based on detected patterns."
+    return `This article raises credibility concerns. It ${reasons.slice(0, -1).join(", ")}${reasons.length > 1 ? ", and " : ""}${reasons[reasons.length - 1]}.`
+  }
+
+  // UNVERIFIED
+  if (sourceCredibility >= 0.65) reasons.push("the source is generally credible")
+  if (credibilityPatterns.issues.includes("No citations or evidence references")) reasons.push("no citations or evidence are provided")
+  if (emotionalScore > 0.35) reasons.push("some emotional language is present")
+  if (!hasFactCheck) reasons.push("no external fact-check was found for the claims")
+
+  if (reasons.length === 0) return "The article could not be fully verified. Cross-referencing with other sources is recommended."
+  return `This article's credibility is unclear. ${reasons.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(". ")}.`
+}
+
+// ── Find trusted sources that have actually published related articles ─────────
+// Uses NewsAPI to search across trusted domains. Only returns sources where
+// a matching article was found. Falls back to the source's search page.
+// Returns [] when nothing relevant found — never guesses.
+const TRUSTED_DOMAINS_NEWSAPI = [
+  // Philippine
+  { domain: "rappler.com",        name: "Rappler",                   url: "https://rappler.com" },
+  { domain: "gmanetwork.com",     name: "GMA News",                  url: "https://gmanetwork.com/news" },
+  { domain: "abs-cbn.com",        name: "ABS-CBN News",              url: "https://news.abs-cbn.com" },
+  { domain: "inquirer.net",       name: "Philippine Daily Inquirer", url: "https://inquirer.net" },
+  { domain: "philstar.com",       name: "Philstar",                  url: "https://philstar.com" },
+  { domain: "manilatimes.net",    name: "Manila Times",              url: "https://manilatimes.net" },
+  { domain: "mb.com.ph",          name: "Manila Bulletin",           url: "https://mb.com.ph" },
+  { domain: "cnnphilippines.com", name: "CNN Philippines",           url: "https://cnnphilippines.com" },
+  // International
+  { domain: "bbc.com",            name: "BBC News",                  url: "https://bbc.com/news" },
+  { domain: "reuters.com",        name: "Reuters",                   url: "https://reuters.com" },
+  { domain: "apnews.com",         name: "Associated Press",          url: "https://apnews.com" },
+  { domain: "cnn.com",            name: "CNN",                       url: "https://cnn.com" },
+  { domain: "theguardian.com",    name: "The Guardian",              url: "https://theguardian.com" },
+  { domain: "nytimes.com",        name: "New York Times",            url: "https://nytimes.com" },
+  { domain: "washingtonpost.com", name: "Washington Post",           url: "https://washingtonpost.com" },
+  { domain: "bloomberg.com",      name: "Bloomberg",                 url: "https://bloomberg.com" },
+  { domain: "aljazeera.com",      name: "Al Jazeera",                url: "https://aljazeera.com" },
+  { domain: "npr.org",            name: "NPR",                       url: "https://npr.org" },
+  { domain: "cnbc.com",           name: "CNBC",                      url: "https://cnbc.com" },
+]
+
+type SourceResult = { name: string; url: string; article_url?: string; search_url: string; homepage_url: string }
+
+async function findRelatedTrustedSources(
+  searchQuery: string,
+  excludeDomain: string | null,
+  newsApiKey: string | undefined,
+  detectedTopics: string[],
+  isPhilippinesContent: boolean,
+): Promise<SourceResult[]> {
+  if (!searchQuery) return []
+
+  const candidates = TRUSTED_DOMAINS_NEWSAPI.filter(
+    (s) => !excludeDomain || !s.domain.includes(excludeDomain),
+  )
+
+  // ── Path A: NewsAPI — find sources that actually published related articles ──
+  if (newsApiKey) {
+    try {
+      const domainList = candidates.map((s) => s.domain).join(",")
+      const q = searchQuery.substring(0, 100).trim().split(/\s+/).map(encodeURIComponent).join("+")
+      const apiUrl = `https://newsapi.org/v2/everything?q=${q}&domains=${domainList}&sortBy=relevancy&pageSize=10&language=en&apiKey=${newsApiKey}`
+      const res = await fetch(apiUrl, { signal: AbortSignal.timeout(6000) })
+
+      if (res.ok) {
+        const data = await res.json()
+        const articles: any[] = data.articles ?? []
+
+        if (articles.length > 0) {
+          const seen = new Set<string>()
+          const candidates_to_verify: Array<{ article: any; match: typeof candidates[0] }> = []
+
+          // Collect unique-domain candidates first
+          for (const article of articles) {
+            if (!article.url?.startsWith("http")) continue
+            // Skip removed articles (NewsAPI returns "[Removed]" for some)
+            if (article.title === "[Removed]" || article.url?.includes("removed")) continue
+
+            let articleDomain = ""
+            try { articleDomain = new URL(article.url).hostname.replace("www.", "") } catch { continue }
+
+            if (seen.has(articleDomain)) continue
+            seen.add(articleDomain)
+
+            const match = candidates.find((s) => articleDomain.includes(s.domain) || s.domain.includes(articleDomain))
+            if (!match) continue
+
+            candidates_to_verify.push({ article, match })
+          }
+
+          // Verify each article URL is actually accessible (HEAD request)
+          // Run checks in parallel, timeout 4s per URL
+          const verified: SourceResult[] = []
+          await Promise.all(
+            candidates_to_verify.slice(0, 6).map(async ({ article, match }) => {
+              if (verified.length >= 3) return
+              try {
+                const check = await fetch(article.url, {
+                  method: "HEAD",
+                  signal: AbortSignal.timeout(4000),
+                  redirect: "follow",
+                })
+                // Only accept 200 OK — skip 404, 403 (paywall), 410 (gone)
+                if (check.status === 200) {
+                  verified.push({
+                    name: match.name,
+                    url: article.url,
+                    article_url: article.url,
+                    search_url: buildSourceSearchUrl(match.domain, searchQuery),
+                    homepage_url: match.url,
+                  })
+                }
+              } catch {
+                // URL unreachable — skip it silently
+              }
+            })
+          )
+
+          if (verified.length > 0) return verified.slice(0, 3)
+          // All articles failed verification — fall through to search pages
+        }
+      }
+    } catch { /* fall through to topic-based */ }
+  }
+
+  // ── Path B: Topic-based fallback — use source search pages ───────────────
+  // Only when NewsAPI is unavailable or found no accessible articles.
+  // Links go to the source's search page pre-filled with the query —
+  // the user can browse results themselves rather than hitting a dead link.
+  if (detectedTopics.length === 0) return []
+
+  const topicMatched = ALL_SOURCES
+    .filter((src) => {
+      if (excludeDomain && src.domain.includes(excludeDomain)) return false
+      if (src.isLocal && !isPhilippinesContent) return false
+      return true
+    })
+    .map((src) => {
+      const overlap = src.topics.filter((t) => detectedTopics.includes(t)).length
+      return { src, overlap, score: overlap + src.credibility * 0.01 }
+    })
+    .filter((s) => s.overlap > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+
+  if (topicMatched.length === 0) return []
+
+  return topicMatched.map(({ src }) => {
+    const search_url = buildSourceSearchUrl(src.domain, searchQuery)
+    return {
+      name: src.name,
+      url: search_url,
+      article_url: undefined,
+      search_url,
+      homepage_url: src.url,
+    }
+  })
+}
+
+// Build a short, clean search query — max 5 meaningful keywords (heuristic)
+function buildSearchQuery(content: string, claims: string[]): string {
+  const stopwords = new Set([
+    "the","a","an","and","or","but","is","are","was","were","to","of","in",
+    "at","on","by","for","with","this","that","it","its","as","be","been",
+    "has","had","have","will","said","also","from","more","than","about",
+    "after","before","over","under","they","their","there","been","would",
+    "could","should","very","just","that","which","when","what","where","who",
+  ])
+
+  const base = claims[0] || content.substring(0, 200)
+
+  const tokens = base
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !stopwords.has(w.toLowerCase()))
+    .slice(0, 5)
+
+  return tokens.join(" ").trim() || content.substring(0, 60).replace(/[^a-zA-Z0-9\s]/g, " ").trim()
+}
+
+// Ask OpenAI to generate a precise search query for the article
+// Returns null if OpenAI unavailable — caller falls back to buildSearchQuery
+async function buildAISearchQuery(content: string, openaiApiKey?: string, groqApiKey?: string): Promise<string | null> {
+  const groqKey = groqApiKey
+  const systemMsg = "You generate short, specific news search queries. Respond with ONLY the query — no quotes, no punctuation, no explanation. Max 6 words."
+  const userMsg = `Generate a search query for finding related news articles about this:\n\n${content.substring(0, 800)}`
+
+  const tryQuery = async (baseUrl: string, key: string, model: string) => {
+    try {
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model, max_tokens: 20, temperature: 0,
+          messages: [
+            { role: "system", content: systemMsg },
+            { role: "user", content: userMsg },
+          ],
+        }),
+        signal: AbortSignal.timeout(6000),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      const q = data.choices?.[0]?.message?.content?.trim()
+      return q && q.length > 3 && q.length < 80 && !q.includes("{") ? q : null
+    } catch { return null }
+  }
+
+  if (groqKey) {
+    const q = await tryQuery("https://api.groq.com/openai/v1", groqKey, "llama-3.3-70b-versatile")
+    if (q) return q
+  }
+  if (openaiApiKey) {
+    const q = await tryQuery("https://api.openai.com/v1", openaiApiKey, "gpt-4o-mini")
+    if (q) return q
+  }
+  return null
+}
+
+
+// ─── NEW: extract readable domain label for UI display ─────────────────────
+function extractDomainLabel(url: string): string {
+  try {
+    const host = new URL(url).hostname.replace("www.", "")
+    const knownLabels: Record<string, string> = {
+      "rappler.com": "Rappler",
+      "gmanetwork.com": "GMA News",
+      "abs-cbn.com": "ABS-CBN",
+      "inquirer.net": "Inquirer",
+      "philstar.com": "Philstar",
+      "bbc.co.uk": "BBC",
+      "bbc.com": "BBC",
+      "reuters.com": "Reuters",
+      "apnews.com": "AP News",
+      "cnn.com": "CNN",
+      "nytimes.com": "NYT",
+      "theguardian.com": "The Guardian",
+      "news.google.com": "Google News",
+    }
+    return Object.entries(knownLabels).find(([d]) => host.includes(d))?.[1] ?? host
+  } catch {
+    return "trusted source"
   }
 }
 
 function analyzeSentiment(text: string) {
   const emotionalWords = {
     extreme: [
-      "shocking",
-      "outrageous",
-      "unbelievable",
-      "evil",
-      "exclusive",
-      "breaking",
-      "exposed",
-      "scandal",
-      "bombshell",
-      "conspiracy",
+      "shocking", "outrageous", "unbelievable", "evil", "exclusive", "breaking",
+      "exposed", "scandal", "bombshell", "conspiracy",
     ],
     high: [
-      "amazing",
-      "terrible",
-      "urgent",
-      "alarming",
-      "horrific",
-      "disaster",
-      "tragic",
-      "devastating",
-      "stunning",
-      "astonishing",
+      "amazing", "terrible", "urgent", "alarming", "horrific", "disaster",
+      "tragic", "devastating", "stunning", "astonishing",
     ],
     moderate: ["important", "significant", "notable", "remarkable", "developing", "concerning"],
   }
@@ -453,12 +770,10 @@ function analyzeSentiment(text: string) {
     const occurrences = (lowerText.match(new RegExp(`\\b${word}\\b`, "gi")) || []).length
     emotionalScore += occurrences * 0.2
   }
-
   for (const word of emotionalWords.high) {
     const occurrences = (lowerText.match(new RegExp(`\\b${word}\\b`, "gi")) || []).length
     emotionalScore += occurrences * 0.1
   }
-
   for (const word of emotionalWords.moderate) {
     const occurrences = (lowerText.match(new RegExp(`\\b${word}\\b`, "gi")) || []).length
     emotionalScore += occurrences * 0.05
@@ -476,30 +791,17 @@ function analyzeSentiment(text: string) {
 function detectClickbait(text: string): number {
   const clickbaitPatterns = {
     urgency: [
-      "you won't believe",
-      "shocking",
-      "must see",
-      "don't miss",
-      "breaking news",
-      "just happened",
-      "this second",
-      "immediately",
-      "act now",
-      "limited time",
+      "you won't believe", "shocking", "must see", "don't miss", "breaking news",
+      "just happened", "this second", "immediately", "act now", "limited time",
     ],
     exaggeration: [
-      "number one",
-      "best ever",
-      "worst ever",
-      "unbelievable",
-      "insane",
-      "crazy",
-      "mind-blowing",
-      "absolutely",
-      "stunning",
-      "astonishing",
+      "number one", "best ever", "worst ever", "unbelievable", "insane", "crazy",
+      "mind-blowing", "absolutely", "stunning", "astonishing",
     ],
-    vague: ["they say", "people claim", "sources say", "officials say", "health experts say", "celebrities say"],
+    vague: [
+      "they say", "people claim", "sources say", "officials say",
+      "health experts say", "celebrities say",
+    ],
   }
 
   const lowerText = text.toLowerCase()
@@ -508,11 +810,9 @@ function detectClickbait(text: string): number {
   for (const pattern of clickbaitPatterns.urgency) {
     if (lowerText.includes(pattern)) clickbaitScore += 0.16
   }
-
   for (const pattern of clickbaitPatterns.exaggeration) {
     if (lowerText.includes(pattern)) clickbaitScore += 0.13
   }
-
   for (const pattern of clickbaitPatterns.vague) {
     if (lowerText.includes(pattern)) clickbaitScore += 0.22
   }
@@ -552,125 +852,188 @@ function extractMainClaims(text: string): string[] {
   return sentences.slice(0, 3).map((s) => s.trim())
 }
 
-function analyzeSource(content: string, type: string) {
-  const localSources = [
-    { domain: "rappler.com", name: "Rappler", credibility: 0.95, url: "https://rappler.com" },
-    { domain: "gmanetwork.com", name: "GMA News", credibility: 0.93, url: "https://gmanetwork.com/news" },
-    { domain: "abs-cbn.com", name: "ABS-CBN News", credibility: 0.92, url: "https://news.abs-cbn.com" },
-    { domain: "inquirer.net", name: "Philippine Daily Inquirer", credibility: 0.9, url: "https://inquirer.net" },
-    { domain: "philstar.com", name: "Philstar", credibility: 0.88, url: "https://philstar.com" },
-    { domain: "manilatimes.net", name: "Manila Times", credibility: 0.87, url: "https://manilatimes.net" },
-    { domain: "manilabulletin.net", name: "Manila Bulletin", credibility: 0.86, url: "https://mb.com.ph" },
-    { domain: "cnnphilippines.com", name: "CNN Philippines", credibility: 0.94, url: "https://cnnphilippines.com" },
-  ]
+// ─── Source registry with topic affinities ────────────────────────────────
+// ── Source registry ───────────────────────────────────────────────────────────
+// Topics represent each source's actual editorial focus.
+// A source is only suggested when the article's dominant topics match.
+const ALL_SOURCES = [
+  // Philippine local sources
+  { domain: "rappler.com",        name: "Rappler",                   credibility: 0.95, url: "https://rappler.com",           isLocal: true,  topics: ["national","politics","crime","health","social","technology","economy","environment"] },
+  { domain: "gmanetwork.com",     name: "GMA News",                  credibility: 0.93, url: "https://gmanetwork.com/news",   isLocal: true,  topics: ["national","politics","entertainment","sports","social","health"] },
+  { domain: "abs-cbn.com",        name: "ABS-CBN News",              credibility: 0.92, url: "https://news.abs-cbn.com",      isLocal: true,  topics: ["national","politics","entertainment","sports","social","health","crime"] },
+  { domain: "inquirer.net",       name: "Philippine Daily Inquirer", credibility: 0.90, url: "https://inquirer.net",          isLocal: true,  topics: ["national","politics","crime","economy","social","sports"] },
+  { domain: "philstar.com",       name: "Philstar",                  credibility: 0.88, url: "https://philstar.com",          isLocal: true,  topics: ["national","politics","economy","sports","entertainment","social"] },
+  { domain: "manilatimes.net",    name: "Manila Times",              credibility: 0.87, url: "https://manilatimes.net",       isLocal: true,  topics: ["national","politics","economy","business","social"] },
+  { domain: "mb.com.ph",          name: "Manila Bulletin",           credibility: 0.86, url: "https://mb.com.ph",             isLocal: true,  topics: ["national","politics","economy","technology","sports"] },
+  { domain: "cnnphilippines.com", name: "CNN Philippines",           credibility: 0.94, url: "https://cnnphilippines.com",    isLocal: true,  topics: ["national","politics","economy","health","social","environment"] },
+  // International sources
+  { domain: "bbc.com",            name: "BBC News",                  credibility: 0.98, url: "https://bbc.com/news",          isLocal: false, topics: ["world","politics","health","science","technology","environment","economy","sports"] },
+  { domain: "reuters.com",        name: "Reuters",                   credibility: 0.97, url: "https://reuters.com",           isLocal: false, topics: ["economy","finance","world","politics","health","technology","science"] },
+  { domain: "apnews.com",         name: "Associated Press",          credibility: 0.97, url: "https://apnews.com",            isLocal: false, topics: ["world","politics","health","sports","science","technology","crime"] },
+  { domain: "cnn.com",            name: "CNN",                       credibility: 0.95, url: "https://cnn.com",               isLocal: false, topics: ["world","politics","health","technology","entertainment","business"] },
+  { domain: "theguardian.com",    name: "The Guardian",              credibility: 0.94, url: "https://theguardian.com",       isLocal: false, topics: ["environment","science","health","politics","social","technology","world"] },
+  { domain: "nytimes.com",        name: "New York Times",            credibility: 0.96, url: "https://nytimes.com",           isLocal: false, topics: ["world","politics","economy","health","science","technology","social"] },
+  { domain: "washingtonpost.com", name: "Washington Post",           credibility: 0.95, url: "https://washingtonpost.com",    isLocal: false, topics: ["world","politics","economy","technology","social"] },
+  { domain: "bloomberg.com",      name: "Bloomberg",                 credibility: 0.94, url: "https://bloomberg.com",         isLocal: false, topics: ["economy","finance","markets","business","technology"] },
+  { domain: "aljazeera.com",      name: "Al Jazeera",                credibility: 0.93, url: "https://aljazeera.com",         isLocal: false, topics: ["world","politics","environment","social","health"] },
+  { domain: "npr.org",            name: "NPR",                       credibility: 0.96, url: "https://npr.org",               isLocal: false, topics: ["science","health","technology","social","politics","environment"] },
+  { domain: "cnbc.com",           name: "CNBC",                      credibility: 0.94, url: "https://cnbc.com",              isLocal: false, topics: ["economy","finance","markets","business","technology"] },
+  { domain: "foxnews.com",        name: "Fox News",                  credibility: 0.85, url: "https://foxnews.com",           isLocal: false, topics: ["world","politics","sports","entertainment"] },
+]
 
-  const internationalSources = [
-    { domain: "bbc.com", name: "BBC News", credibility: 0.98, url: "https://bbc.com/news" },
-    { domain: "reuters.com", name: "Reuters", credibility: 0.97, url: "https://reuters.com" },
-    { domain: "apnews.com", name: "Associated Press", credibility: 0.97, url: "https://apnews.com" },
-    { domain: "cnn.com", name: "CNN", credibility: 0.95, url: "https://cnn.com" },
-    { domain: "theguardian.com", name: "The Guardian", credibility: 0.94, url: "https://theguardian.com" },
-    { domain: "nytimes.com", name: "New York Times", credibility: 0.96, url: "https://nytimes.com" },
-    { domain: "washingtonpost.com", name: "Washington Post", credibility: 0.95, url: "https://washingtonpost.com" },
-    { domain: "bloomberg.com", name: "Bloomberg", credibility: 0.94, url: "https://bloomberg.com" },
-    { domain: "aljazeera.com", name: "Al Jazeera", credibility: 0.93, url: "https://aljazeera.com" },
-    { domain: "npr.org", name: "NPR", credibility: 0.96, url: "https://npr.org" },
-    { domain: "cnbc.com", name: "CNBC", credibility: 0.94, url: "https://cnbc.com" },
-    { domain: "foxnews.com", name: "Fox News", credibility: 0.85, url: "https://foxnews.com" },
-  ]
+// ── Topic keyword map ──────────────────────────────────────────────────────
+const TOPIC_KEYWORDS: Record<string, string[]> = {
+  politics:      ["president","senator","congress","parliament","election","vote","politician","government","administration","policy","senate","official","minister","governor","mayor","legislative","cabinet","ruling"],
+  health:        ["disease","health","hospital","doctor","medicine","vaccine","pandemic","covid","virus","treatment","patient","medical","surgery","clinic","symptoms","outbreak","healthcare","mortality","epidemic"],
+  economy:       ["economy","market","stock","business","trade","investment","finance","money","gdp","inflation","unemployment","budget","debt","revenue","fiscal","monetary","recession","bank"],
+  technology:    ["technology","tech","software","app","digital","internet","computer","artificial intelligence","ai","robot","startup","cybersecurity","hack","data","smartphone","cloud","algorithm","platform"],
+  science:       ["scientist","discovery","experiment","space","nasa","species","fossil","gene","dna","particle","research","laboratory","asteroid","telescope","biology","chemistry","physics"],
+  sports:        ["sport","game","team","player","match","championship","score","league","tournament","coach","athlete","basketball","football","boxing","tennis","olympics","fifa","nba"],
+  entertainment: ["movie","film","actor","actress","music","singer","celebrity","concert","award","show","series","netflix","streaming","album","director","box office","grammy","oscar"],
+  environment:   ["climate","pollution","flood","typhoon","earthquake","carbon","renewable","energy","deforestation","wildlife","ocean","emissions","drought","wildfire","biodiversity","glacier"],
+  crime:         ["crime","arrest","police","drug","murder","robbery","kidnap","suspect","court","verdict","prison","investigation","illegal","trafficking","fraud","corruption","sentenced","convicted","charged"],
+  social:        ["poverty","education","school","student","protest","rights","gender","equality","welfare","housing","migrant","discrimination","inequality","refugee","human rights"],
+  world:         ["international","foreign","war","conflict","treaty","diplomacy","united nations","nato","sanctions","embassy","bilateral","geopolitics","military","troops","ceasefire","invasion"],
+  national:      ["philippines","filipino","manila","luzon","visayas","mindanao","cebu","davao","quezon city","makati","ncrpo","doh","dpwh","deped","dilg","nbi","pnp","bsp","pcso"],
+}
 
-  const allSources = [...localSources, ...internationalSources]
+// ── Detect dominant topics from content ────────────────────────────────────
+// Requires at least 2 keyword hits per topic, and only returns topics that
+// score at least 30% of the highest-scoring topic — avoids weak incidental matches.
+function detectTopicsFromContent(text: string): string[] {
+  const lower = text.toLowerCase()
+  const scores: Record<string, number> = {}
+
+  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
+    let score = 0
+    for (const kw of keywords) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")
+      const matches = lower.match(new RegExp(`\\b${escaped}\\b`, "g"))
+      if (matches) score += matches.length
+    }
+    if (score >= 2) scores[topic] = score
+  }
+
+  if (Object.keys(scores).length === 0) return []
+
+  const maxScore = Math.max(...Object.values(scores))
+
+  return Object.entries(scores)
+    .filter(([, s]) => s >= maxScore * 0.30)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([topic]) => topic)
+}
+
+// ── Select sources relevant to dominant topics ─────────────────────────────
+function selectRelevantSources(
+  excludeDomain: string | null,
+  detectedTopics: string[],
+  count: number,
+  isPhilippinesContent: boolean,
+): typeof ALL_SOURCES {
+  if (detectedTopics.length === 0) return []
+
+  const scored = ALL_SOURCES
+    .filter((src) => {
+      if (excludeDomain && src.domain.includes(excludeDomain)) return false
+      if (src.isLocal && !isPhilippinesContent) return false
+      return true
+    })
+    .map((src) => {
+      const overlap = src.topics.filter((t) => detectedTopics.includes(t)).length
+      return { src, overlap, score: overlap + src.credibility * 0.01 }
+    })
+    .filter((s) => s.overlap > 0)
+    .sort((a, b) => b.score - a.score)
+
+  if (scored.length === 0) return []
+
+  return scored.slice(0, count).map((s) => s.src)
+}
+function analyzeSource(content: string, type: string, originalInput?: string) {
   const text = content.toLowerCase()
+  const urlToParse = type === "url" && originalInput ? originalInput : content
+
+  // Detect topics from actual content
+  const detectedTopics = detectTopicsFromContent(text)
+  // Local PH sources only when content has BOTH a national topic AND
+  // at least 2 distinct PH-specific keywords (not just a passing mention)
+  const phKeywordMatches = TOPIC_KEYWORDS.national.filter((kw) => text.includes(kw)).length
+  const isPhilippinesContent = detectedTopics.includes("national") && phKeywordMatches >= 2
+
   let detectedSource = ""
   const detectedSources: Array<{ name: string; url: string }> = []
   let credibility = 0.5
   let label = "Unable to verify source"
+  let excludeDomain: string | null = null
 
-  // Extract key topics from content to find related sources
-  const topics = extractTopicsFromContent(text)
-
-  if (type === "url" || text.startsWith("http")) {
+  if (type === "url") {
     try {
-      const parsed = new URL(content)
-      const host = parsed.hostname?.replace("www.", "") || ""
-      const match = allSources.find((src) => host.includes(src.domain))
+      const parsed = new URL(urlToParse)
+      detectedSource = parsed.href
+      const host = parsed.hostname.replace("www.", "")
+      const match = ALL_SOURCES.find((src) => host.includes(src.domain))
+      excludeDomain = host // always exclude the source itself from suggestions
 
       if (match) {
-        detectedSource = parsed.href
         credibility = match.credibility
-        const isLocal = localSources.some((s) => s.domain === match.domain)
-        label = isLocal ? `Verified Philippine news: ${match.name}` : `Verified International source: ${match.name}`
+        label = match.isLocal
+          ? `Verified Philippine news: ${match.name}`
+          : `Verified International source: ${match.name}`
 
-        detectedSources.push({ name: match.name, url: match.url })
-
-        const relatedSources = allSources
-          .filter(
-            (src) =>
-              src.name !== match.name && (localSources.some((s) => s.domain === src.domain) || src.credibility >= 0.9),
-          )
-          .sort((a, b) => b.credibility - a.credibility)
-          .slice(0, 2)
-
-        detectedSources.push(...relatedSources)
+        // The source itself is NOT in suggestions — user already knows that source
+        // Pick 3 OTHER relevant sources based on content topics
+        const suggestions = selectRelevantSources(host, detectedTopics, 3, isPhilippinesContent)
+        detectedSources.push(...suggestions.map((s) => ({ name: s.name, url: s.url })))
       } else {
-        detectedSource = parsed.href
         credibility = 0.35
         label = `Unverified source: ${host}`
-
-        const suggestedSources = localSources.slice(0, 2).concat(internationalSources.slice(0, 1))
-        detectedSources.push(...suggestedSources.map((src) => ({ name: src.name, url: src.url })))
+        const suggestions = selectRelevantSources(host, detectedTopics, 3, isPhilippinesContent)
+        detectedSources.push(...suggestions.map((s) => ({ name: s.name, url: s.url })))
       }
     } catch {
       /* ignore invalid URL */
     }
   } else {
-    // For text/file input: find sources mentioned or suggest top verified sources
-    for (const src of allSources) {
-      if (text.includes(src.domain.split(".")[0]) || text.includes(src.name.toLowerCase())) {
-        detectedSources.push({ name: src.name, url: src.url })
-        credibility = src.credibility
-        const isLocal = localSources.some((s) => s.domain === src.domain)
-        label = isLocal ? `Verified Philippine news: ${src.name}` : `Verified International source: ${src.name}`
-        break
-      }
-    }
+    // Text input — check if any known source is mentioned in the text
+    const mentionedSource = ALL_SOURCES.find(
+      (src) =>
+        text.includes(src.domain.split(".")[0]) ||
+        text.includes(src.name.toLowerCase()),
+    )
 
-    // If still no sources found, add top credibility sources as suggestions
-    if (detectedSources.length === 0) {
-      const topSources = localSources.slice(0, 2).concat(internationalSources.slice(0, 1))
-      detectedSources.push(...topSources.map((src) => ({ name: src.name, url: src.url })))
-      label = "Suggested verified news sources"
+    if (mentionedSource) {
+      credibility = mentionedSource.credibility
+      detectedSource = mentionedSource.url
+      excludeDomain = mentionedSource.domain
+      label = mentionedSource.isLocal
+        ? `Verified Philippine news: ${mentionedSource.name}`
+        : `Verified International source: ${mentionedSource.name}`
+
+      // Suggest OTHER relevant sources, not the one already in the text
+      const suggestions = selectRelevantSources(mentionedSource.domain, detectedTopics, 3, isPhilippinesContent)
+      detectedSources.push(...suggestions.map((s) => ({ name: s.name, url: s.url })))
+    } else {
+      // No source mentioned — suggest based purely on content topics only if topics found
+      if (detectedTopics.length > 0) {
+        label = `Suggested sources for: ${detectedTopics.slice(0, 2).join(", ")}`
+        const suggestions = selectRelevantSources(null, detectedTopics, 3, isPhilippinesContent)
+        detectedSources.push(...suggestions.map((s) => ({ name: s.name, url: s.url })))
+      } else {
+        label = "Unable to verify source"
+        // No topics detected — show nothing rather than irrelevant sources
+      }
     }
   }
 
   return { credibility, label, source: detectedSource, detectedSources: detectedSources.slice(0, 3) }
 }
 
-function extractTopicsFromContent(text: string): string[] {
-  const topics: string[] = []
-  const topicKeywords = {
-    politics: ["president", "senator", "congress", "parliament", "election", "vote", "politician", "political"],
-    health: ["disease", "health", "hospital", "doctor", "medicine", "vaccine", "pandemic", "covid"],
-    economy: ["economy", "market", "stock", "business", "trade", "investment", "finance", "money"],
-    technology: ["tech", "software", "app", "digital", "internet", "computer", "artificial"],
-    sports: ["sport", "game", "team", "player", "match", "championship", "score", "league"],
-    entertainment: ["movie", "film", "actor", "actress", "music", "singer", "celebrity", "show"],
-    science: ["research", "study", "scientist", "discovery", "experiment", "space", "nasa"],
-  }
-
-  for (const [topic, keywords] of Object.entries(topicKeywords)) {
-    if (keywords.some((kw) => text.includes(kw))) {
-      topics.push(topic)
-    }
-  }
-
-  return topics
-}
 
 async function generateFactChecksWithRealAPIs(content: string, claims: string[]) {
   const googleApiKey = process.env.GOOGLE_FACT_CHECK_API_KEY
-  const newsApiKey = process.env.NEWSAPI_KEY
-  const hfApiKey = process.env.HUGGINGFACE_API_KEY
+  const newsApiKey = process.env.NEWS_API_KEY
 
   const mainClaim = claims[0] || content.substring(0, 150)
   const results: any[] = []
@@ -686,7 +1049,9 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
             const mapped = data.claims.slice(0, 3).map((c: any) => ({
               claim: c.text,
               conclusion: c.claimReview?.[0]?.textualRating || "Unverified",
+              // ─── Use claimReview URL (actual article), not just the publisher root ──
               source: c.claimReview?.[0]?.url || "https://toolbox.google.com/factcheck",
+              source_label: c.claimReview?.[0]?.publisher?.name || "Google Fact Check",
               reviewer: c.claimReview?.[0]?.publisher?.name || "Google Fact Check",
               relevance: computeRelevance(mainClaim, c.text),
             }))
@@ -709,7 +1074,9 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
             const mapped = data.articles.map((a: any) => ({
               claim: a.title,
               conclusion: `From verified news source: "${a.description || a.content?.substring(0, 100)}"`,
+              // ─── Use the actual article URL from NewsAPI ──────────────────────────
               source: a.url,
+              source_label: a.source?.name || "News Source",
               reviewer: a.source?.name || "News Source",
               relevance: computeRelevance(mainClaim, a.title),
             }))
@@ -729,6 +1096,7 @@ async function generateFactChecksWithRealAPIs(content: string, claims: string[])
       claim: mainClaim.substring(0, 100),
       conclusion: "Unable to verify with external APIs. Please manually check with trusted news outlets.",
       source: "https://rappler.com",
+      source_label: "Rappler",
       reviewer: "Manual Verification Required",
       relevance: 0,
     })
@@ -806,8 +1174,7 @@ function analyzeCredibilityPatterns(text: string): { score: number; hasIssues: b
 
 async function analyzeSourceCredibility(content: string, type: string, baseCredibility: number, verdict?: string) {
   const googleApiKey = process.env.GOOGLE_FACT_CHECK_API_KEY
-  const newsApiKey = process.env.NEWSAPI_KEY
-  const hfApiKey = process.env.HUGGINGFACE_API_KEY
+  const newsApiKey = process.env.NEWS_API_KEY
 
   const lower = content.toLowerCase()
   const result: any = {
@@ -819,7 +1186,6 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
     bias_indicators: [],
   }
 
-  // --- 1) DOMAIN AUTHORITY CHECK (if URL) ---
   if (type === "url") {
     try {
       const parsed = new URL(content)
@@ -833,7 +1199,7 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
 
       if (daScore?.response?.[0]?.page_rank_integer) {
         const pageRank = daScore.response[0].page_rank_integer
-        result.domain_authority = pageRank / 10 // normalize 0–10 -> 0–1
+        result.domain_authority = pageRank / 10
         result.credibility_score = (result.credibility_score + result.domain_authority) / 2
         result.reason.push("Domain authority successfully retrieved.")
       } else {
@@ -844,7 +1210,6 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
     }
   }
 
-  // --- 2) GOOGLE FACT CHECK API (CREDIBILITY BY VERIFICATION) ---
   if (googleApiKey) {
     try {
       const query = content.substring(0, 120)
@@ -875,7 +1240,6 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
     }
   }
 
-  // --- 3) NEWS API "trusted source" matching ---
   if (newsApiKey) {
     try {
       const res = await fetch(`https://newsapi.org/v2/top-headlines?language=en&apiKey=${newsApiKey}`)
@@ -895,39 +1259,12 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
     }
   }
 
-  // --- 4) HUGGINGFACE "credibility classifier" ---
-  if (hfApiKey) {
-    try {
-      const hfRes = await fetch(
-        "https://router.huggingface.co/hf-inference/models/cross-encoder/ms-marco-MiniLM-L-6-v2",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${hfApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            inputs: [[content, "credible news article"]],
-          }),
-        },
-      )
 
-      const score = Array.isArray(await hfRes.json()) ? (await hfRes.json())[0] : 0
-      result.api_checks.push({ api: "HuggingFace Credibility", score })
 
-      result.credibility_score = (result.credibility_score + score) / 2
-    } catch {
-      result.api_checks.push({ api: "HuggingFace Credibility", status: "Failed" })
-    }
-  }
-
-  // --- FINAL LABEL ---
   const final = result.credibility_score
-
   result.credibility_label =
     final > 0.8 ? "Highly credible" : final > 0.6 ? "Credible" : final > 0.4 ? "Uncertain" : "Low credibility"
 
-  // --- BIAS RATING (with explanations) ---
   try {
     const knownRight = ["foxnews.com", "breitbart.com", "dailycaller.com"]
     const knownLeft = ["cnn.com", "msnbc.com", "huffpost.com"]
@@ -948,10 +1285,7 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
       if (domain) {
         if (knownRight.some((d) => domain.includes(d))) {
           result.bias_rating = "Right-leaning"
-          result.bias_indicators = [
-            "Known right-leaning editorial stance",
-            "Opinion content may reflect political bias",
-          ]
+          result.bias_indicators = ["Known right-leaning editorial stance", "Opinion content may reflect political bias"]
         } else if (knownLeft.some((d) => domain.includes(d))) {
           result.bias_rating = "Left-leaning"
           result.bias_indicators = ["Known left-leaning editorial stance", "Opinion content may reflect political bias"]
@@ -997,7 +1331,6 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
 
 async function analyzeContentQuality(content: string, verdict?: string, confidence?: number) {
   const ltKey = process.env.LT_API_KEY
-  const hfApiKey = process.env.HUGGINGFACE_API_KEY
 
   const result: any = {
     readability_score: null,
@@ -1010,57 +1343,29 @@ async function analyzeContentQuality(content: string, verdict?: string, confiden
     quality_label: "Neutral",
   }
 
-  // --- READABILITY ---
   const sentences = content.split(/[.!?]+/).filter((s) => s.trim().length)
   const words = content.split(/\s+/).length
   result.structure.avg_sentence_length = Math.round(words / Math.max(sentences.length, 1))
-
   result.readability_score = Math.max(0, Math.min(1, 1 - result.structure.avg_sentence_length / 40))
 
-  // --- LANGUAGETOOL GRAMMAR API ---
   if (ltKey) {
     try {
       const res = await fetch("https://api.languagetoolplus.com/v2/check", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          text: content,
-          language: "en-US",
-          apiKey: ltKey,
-        }),
+        body: new URLSearchParams({ text: content, language: "en-US", apiKey: ltKey }),
       })
-
       const data = await res.json()
       result.grammar_issues = data.matches?.slice(0, 5) || []
     } catch {}
   }
 
-  // --- HUGGINGFACE COHERENCE ---
-  if (hfApiKey) {
-    try {
-      const response = await fetch(
-        "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${hfApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            inputs: [content, "highly coherent professionally written article"],
-          }),
-        },
-      )
 
-      const score = Array.isArray(await response.json()) ? (await response.json())[0] : 0
-      result.coherence_score = score
-    } catch {}
-  }
 
-  // --- SPECIFICITY heuristics ---
   const numbersCount = (content.match(/\b\d{1,4}\b/g) || []).length
-  const dateMatches = (content.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\b|\b\d{4}\b/g) || [])
-    .length
+  const dateMatches = (
+    content.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\b|\b\d{4}\b/g) || []
+  ).length
   const namedSourcePatterns = [/according to/i, /reported by/i, /said/i, /source:/i, /\bvia\b/i]
   const namedSourcesCount = namedSourcePatterns.reduce((acc, p) => acc + (p.test(content) ? 1 : 0), 0)
   const namedEntitiesCount = (content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\b/g) || []).length
@@ -1081,7 +1386,6 @@ async function analyzeContentQuality(content: string, verdict?: string, confiden
   else if (specificityScore > 0.5) specificity_label = "Somewhat specific"
   else if (specificityScore > 0.3) specificity_label = "Slightly specific"
 
-  // --- EVIDENCE STRENGTH with verdict-aware adjustments ---
   const citationPatterns = [
     /according to\s+(?:sources|officials|experts)/i,
     /research\s+(?:shows|indicates|suggests)/i,
@@ -1090,7 +1394,6 @@ async function analyzeContentQuality(content: string, verdict?: string, confiden
     /\[\d+\]/,
   ]
   const citationCount = citationPatterns.reduce((acc, p) => acc + (p.test(content) ? 1 : 0), 0)
-
   const grammarPenalty = Math.min(1, result.grammar_issues.length / 6)
   const evidenceScore = Math.max(
     0,

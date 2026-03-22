@@ -36,11 +36,11 @@ interface HistoryItem {
 function getCredibilityLabel(verdict: string): string {
   switch (verdict) {
     case "REAL":
-      return "High Credibility"
+      return "Credible"
     case "FAKE":
-      return "Low Credibility"
+      return "Likely False"
     case "UNVERIFIED":
-      return "Moderate Credibility"
+      return "Unverified"
     default:
       return verdict
   }
