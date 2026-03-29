@@ -2,16 +2,18 @@
 
 import { Card } from "@/components/ui/card"
 import {
-  ExternalLink, AlertCircle, CheckCircle2, AlertTriangle, Search, ShieldCheck, ShieldAlert, ShieldQuestion, BarChart2, FileText, Globe, Info, ChevronDown, ChevronUp, Newspaper
+  ExternalLink, AlertCircle, CheckCircle2, AlertTriangle, Globe, Info,
+  ChevronDown, ChevronUp, Newspaper, ShieldCheck, ShieldAlert, ShieldQuestion,
+  BarChart2, FileText, HelpCircle, XCircle, CheckCheck, AlertOctagon
 } from "lucide-react"
 import { useState } from "react"
 
 interface SourceLink {
   name: string
-  url: string           // best available URL: article > search > homepage
-  article_url?: string  // direct article URL from NewsAPI (may not always exist)
-  search_url?: string   // source search page pre-filled with query
-  homepage_url?: string // bare domain — used as last resort only
+  url: string
+  article_url?: string
+  search_url?: string
+  homepage_url?: string
 }
 
 interface FactCheck {
@@ -79,6 +81,7 @@ const VERDICT_CONFIG = {
     badgeBg: "bg-emerald-100 dark:bg-emerald-900/50",
     barColor: "bg-emerald-500",
     icon: ShieldCheck,
+    dot: "bg-emerald-500",
   },
   FAKE: {
     label: "Likely False",
@@ -88,6 +91,7 @@ const VERDICT_CONFIG = {
     badgeBg: "bg-rose-100 dark:bg-rose-900/50",
     barColor: "bg-rose-500",
     icon: ShieldAlert,
+    dot: "bg-rose-500",
   },
   UNVERIFIED: {
     label: "Unverified",
@@ -97,6 +101,7 @@ const VERDICT_CONFIG = {
     badgeBg: "bg-amber-100 dark:bg-amber-900/50",
     barColor: "bg-amber-500",
     icon: ShieldQuestion,
+    dot: "bg-amber-500",
   },
   ERROR: {
     label: "Error",
@@ -106,10 +111,28 @@ const VERDICT_CONFIG = {
     badgeBg: "bg-orange-100 dark:bg-orange-900/50",
     barColor: "bg-orange-500",
     icon: AlertTriangle,
+    dot: "bg-orange-500",
   },
 }
 
-function ScoreRing({ score, size = 68, strokeWidth = 6, colorClass }: {
+// ── Determine source credibility tier from score + verdict ─────────────────
+function getSourceCredTier(score: number, verdict: string, hasSource: boolean) {
+  if (!hasSource) return "none"
+  if (verdict === "FAKE" || score < 0.40) return "low"
+  if (verdict === "UNVERIFIED" || score < 0.65) return "moderate"
+  return "high"
+}
+
+// ── Determine content quality tier ────────────────────────────────────────
+function getContentQualityTier(score: number, verdict: string) {
+  if (verdict === "FAKE" || score < 0.40) return "low"
+  if (verdict === "UNVERIFIED" || score < 0.65) return "moderate"
+  return "high"
+}
+
+function ScoreRing({
+  score, size = 72, strokeWidth = 7, colorClass,
+}: {
   score: number; size?: number; strokeWidth?: number; colorClass: string
 }) {
   const radius = (size - strokeWidth) / 2
@@ -126,7 +149,9 @@ function ScoreRing({ score, size = 68, strokeWidth = 6, colorClass }: {
   )
 }
 
-function FactorBar({ label, value, color = "bg-blue-500", detail }: {
+function FactorBar({
+  label, value, color = "bg-blue-500", detail,
+}: {
   label: string; value: number; color?: string; detail?: string
 }) {
   const pct = Math.max(0, Math.min(100, Math.round(value)))
@@ -140,19 +165,6 @@ function FactorBar({ label, value, color = "bg-blue-500", detail }: {
         <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
-  )
-}
-
-function SignalPill({ positive, text }: { positive: boolean; text: string }) {
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-      positive
-        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
-        : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400"
-    }`}>
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${positive ? "bg-emerald-500" : "bg-rose-500"}`} />
-      {text}
-    </span>
   )
 }
 
@@ -179,6 +191,582 @@ function ConclusionBadge({ text }: { text: string }) {
   )
 }
 
+// ── Source Credibility Card ─────────────────────────────────────────────────
+function SourceCredibilityCard({
+  result,
+  credScore,
+  verdict,
+}: {
+  result: ResultsDisplayProps["result"]
+  credScore: number
+  verdict: string
+}) {
+  const sourceLabel = result.source_label || ""
+  const hasSource =
+    !!result.source_credibility_detailed?.domain_authority ||
+    sourceLabel.toLowerCase().includes("verified") ||
+    sourceLabel.toLowerCase().includes("suggested") ||
+    (result.source_credibility || 0) > 0
+
+  const tier = getSourceCredTier(credScore / 100, verdict, hasSource)
+  const biasRating = result.source_credibility_detailed?.bias_rating ?? "Unable to determine"
+  const apiChecks = result.source_credibility_detailed?.api_checks ?? []
+
+  // ── NONE: No source found ─────────────────────────────────────────────
+  if (tier === "none") {
+    return (
+      <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="flex items-center gap-2 mb-4">
+          <Globe className="w-4 h-4 text-gray-400" />
+          <h5 className="font-semibold text-foreground text-sm">Source Credibility</h5>
+          <span className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-500">
+            Not Available
+          </span>
+        </div>
+
+        <div className="rounded-xl bg-gray-50 dark:bg-slate-900 border border-dashed border-gray-200 dark:border-slate-700 p-5 text-center space-y-2 mb-4">
+          <HelpCircle className="w-8 h-8 text-gray-400 mx-auto" />
+          <p className="text-sm font-semibold text-foreground">No identifiable source detected</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            No identifiable source was detected, making it impossible to verify credibility.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {[
+            "Source origin cannot be determined",
+            "Unable to verify publisher or author",
+            "No domain authority data available",
+            "Bias assessment not possible without source",
+          ].map((item, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <XCircle className="w-3.5 h-3.5 text-gray-400 shrink-0 mt-0.5" />
+              <span className="text-xs text-muted-foreground">{item}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-border/50">
+          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            Even if content quality is high, proceed with caution when the source is unknown.
+          </p>
+        </div>
+      </Card>
+    )
+  }
+
+  // ── HIGH credibility ───────────────────────────────────────────────────
+  if (tier === "high") {
+    return (
+      <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="flex items-center gap-2 mb-4">
+          <Globe className="w-4 h-4 text-emerald-500" />
+          <h5 className="font-semibold text-foreground text-sm">Source Credibility</h5>
+          <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
+            {Math.round(credScore)}% · High
+          </span>
+        </div>
+
+        <div className="flex items-start gap-4 mb-4">
+          <div className="relative shrink-0 w-[72px] h-[72px]">
+            <ScoreRing score={Math.round(credScore)} colorClass="text-emerald-500" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-sm font-bold text-foreground">{Math.round(credScore)}%</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground mb-0.5">
+              {result.source_credibility_detailed?.credibility_label ?? "Highly Credible"}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              The source is identified as a reliable and established provider of information with strong credibility indicators.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {[
+            "Recognized and reputable domain",
+            "Source is verifiable and publicly known",
+            `Bias rating: ${biasRating === "Neutral" ? "Low — neutral reporting" : biasRating}`,
+            "Matches information from trusted references",
+          ].map((item, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+              <span className="text-xs text-foreground">{item}</span>
+            </div>
+          ))}
+        </div>
+
+        {result.source_credibility_detailed?.domain_authority != null && (
+          <FactorBar
+            label="Domain Authority"
+            value={Math.round((result.source_credibility_detailed.domain_authority ?? 0) * 100)}
+            color="bg-emerald-500"
+          />
+        )}
+
+        {apiChecks.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-border/50">
+            <p className="text-xs font-semibold text-foreground mb-2">Verification Checks</p>
+            <div className="flex flex-wrap gap-2">
+              {apiChecks.map((chk: any, i: number) => (
+                <span key={i} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                  chk.status === "Found"
+                    ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                    : "bg-gray-100 dark:bg-gray-800 text-muted-foreground border-border"
+                }`}>
+                  {chk.status === "Found"
+                    ? <CheckCircle2 className="w-3 h-3" />
+                    : <Info className="w-3 h-3" />}
+                  {chk.api}{chk.rating ? ` · ${chk.rating}` : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+    )
+  }
+
+  // ── MODERATE credibility ───────────────────────────────────────────────
+  if (tier === "moderate") {
+    return (
+      <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="flex items-center gap-2 mb-4">
+          <Globe className="w-4 h-4 text-amber-500" />
+          <h5 className="font-semibold text-foreground text-sm">Source Credibility</h5>
+          <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-500">
+            {Math.round(credScore)}% · Moderate
+          </span>
+        </div>
+
+        <div className="flex items-start gap-4 mb-4">
+          <div className="relative shrink-0 w-[72px] h-[72px]">
+            <ScoreRing score={Math.round(credScore)} colorClass="text-amber-500" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-sm font-bold text-foreground">{Math.round(credScore)}%</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground mb-0.5">
+              {result.source_credibility_detailed?.credibility_label ?? "Uncertain"}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Source credibility is mixed or could not be fully verified. Manual cross-checking is advised.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          <div className="flex items-start gap-2">
+            <CheckCheck className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-foreground">
+              {sourceLabel || "Source partially identified"}
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-muted-foreground">
+              Bias rating: {biasRating}
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-muted-foreground">
+              Verification incomplete — cross-reference with trusted sources
+            </span>
+          </div>
+        </div>
+
+        {result.source_credibility_detailed?.domain_authority != null && (
+          <FactorBar
+            label="Domain Authority"
+            value={Math.round((result.source_credibility_detailed.domain_authority ?? 0) * 100)}
+            color="bg-amber-500"
+          />
+        )}
+
+        {apiChecks.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-border/50">
+            <p className="text-xs font-semibold text-foreground mb-2">Verification Checks</p>
+            <div className="flex flex-wrap gap-2">
+              {apiChecks.map((chk: any, i: number) => (
+                <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                  <Info className="w-3 h-3" />
+                  {chk.api}{chk.rating ? ` · ${chk.rating}` : " · No match"}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+    )
+  }
+
+  // ── LOW credibility ────────────────────────────────────────────────────
+  return (
+    <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+      <div className="flex items-center gap-2 mb-4">
+        <Globe className="w-4 h-4 text-rose-500" />
+        <h5 className="font-semibold text-foreground text-sm">Source Credibility</h5>
+        <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400">
+          {Math.round(credScore)}% · Low
+        </span>
+      </div>
+
+      <div className="flex items-start gap-4 mb-4">
+        <div className="relative shrink-0 w-[72px] h-[72px]">
+          <ScoreRing score={Math.round(credScore)} colorClass="text-rose-500" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-sm font-bold text-foreground">{Math.round(credScore)}%</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-foreground mb-0.5">
+            {result.source_credibility_detailed?.credibility_label ?? "Low Credibility"}
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            The source is identified as unreliable, unverified, or potentially misleading.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2 mb-4">
+        {[
+          "Unknown or suspicious domain/source",
+          "No verifiable publisher or author",
+          "Source does not match trusted references",
+          biasRating.includes("leaning") ? `Bias: ${biasRating}` : "Bias may be extreme or intentionally misleading",
+        ].map((item, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-foreground">{item}</span>
+          </div>
+        ))}
+      </div>
+
+      {apiChecks.length > 0 && (
+        <div className="pt-3 border-t border-border/50">
+          <p className="text-xs font-semibold text-foreground mb-2">Verification Checks</p>
+          <div className="flex flex-wrap gap-2">
+            {apiChecks.map((chk: any, i: number) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800">
+                <AlertCircle className="w-3 h-3" />
+                {chk.api}{chk.rating ? ` · ${chk.rating}` : " · Conflicting claims"}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ── Content Quality Card ───────────────────────────────────────────────────
+function ContentQualityCard({
+  result,
+  contentScore,
+  verdict,
+}: {
+  result: ResultsDisplayProps["result"]
+  contentScore: number
+  verdict: string
+}) {
+  const tier = getContentQualityTier(contentScore / 100, verdict)
+  const readability = Math.round((result.content_quality_detailed?.readability_score ?? 0.5) * 100)
+  const specificity = Math.round((result.content_quality_detailed?.specificity_score ?? 0.4) * 100)
+  const evidenceScore = Math.round((result.content_quality_detailed?.evidence_strength_score ?? 0.5) * 100)
+  const clickbait = Math.round((result.clickbait_score ?? 0) * 100)
+  const credIndicator = Math.round((result.credibility_indicators?.score ?? 0.5) * 100)
+  const grammarIssues = result.content_quality_detailed?.grammar_issues?.length ?? 0
+  const avgSentLen = result.content_quality_detailed?.structure?.avg_sentence_length ?? 0
+  const sentimentLabel = result.sentiment_label ?? "Neutral"
+
+  const isHighTone = sentimentLabel.toLowerCase().includes("emotional")
+  const isClickbait = clickbait > 50
+
+  // ── HIGH quality ───────────────────────────────────────────────────────
+  if (tier === "high") {
+    return (
+      <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="flex items-center gap-2 mb-4">
+          <FileText className="w-4 h-4 text-emerald-500" />
+          <h5 className="font-semibold text-foreground text-sm">Content Quality</h5>
+          <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
+            {Math.round(contentScore)}% · High
+          </span>
+        </div>
+
+        <div className="flex items-start gap-4 mb-4">
+          <div className="relative shrink-0 w-[72px] h-[72px]">
+            <ScoreRing score={Math.round(contentScore)} colorClass="text-emerald-500" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-sm font-bold text-foreground">{Math.round(contentScore)}%</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground mb-0.5">
+              {result.content_quality_detailed?.quality_label ?? "High Quality"}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              The article is well-structured, clearly written, and supported by relevant and verifiable information.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {[
+            "Clear and logical structure",
+            `High readability${grammarIssues === 0 ? " and proper grammar" : ""}`,
+            "Information is specific and detailed",
+            evidenceScore >= 60 ? "Strong supporting evidence or references" : "Reasonable supporting evidence",
+            !isHighTone ? "Neutral and professional tone" : "Moderate tone detected",
+            !isClickbait ? "No clickbait indicators" : "Minimal clickbait detected",
+          ].map((item, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+              <span className="text-xs text-foreground">{item}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-2.5 pt-3 border-t border-border/50">
+          <FactorBar label="Readability" value={readability} color="bg-sky-500" detail={`${readability}%`} />
+          <FactorBar label="Specificity" value={specificity} color="bg-violet-500"
+            detail={result.content_quality_detailed?.specificity_label ?? `${specificity}%`} />
+          <FactorBar label="Evidence Strength" value={evidenceScore} color="bg-emerald-500"
+            detail={result.content_quality_detailed?.evidence_strength_label ?? `${evidenceScore}%`} />
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-border/50 grid grid-cols-2 gap-x-4 gap-y-2">
+          {[
+            { label: "Avg. Sentence", value: `${avgSentLen} words` },
+            { label: "Tone", value: sentimentLabel, color: isHighTone ? "text-amber-500" : "text-emerald-600 dark:text-emerald-400" },
+            { label: "Grammar", value: grammarIssues === 0 ? "Clean" : `${grammarIssues} issue${grammarIssues > 1 ? "s" : ""}`, color: grammarIssues === 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-500" },
+            { label: "Clickbait", value: clickbait < 25 ? "Low" : clickbait < 50 ? "Moderate" : "High", color: clickbait > 50 ? "text-rose-500" : clickbait > 25 ? "text-amber-500" : "text-emerald-600 dark:text-emerald-400" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <span className={`text-xs font-semibold ${color || "text-foreground"}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    )
+  }
+
+  // ── MODERATE quality ───────────────────────────────────────────────────
+  if (tier === "moderate") {
+    return (
+      <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+        <div className="flex items-center gap-2 mb-4">
+          <FileText className="w-4 h-4 text-amber-500" />
+          <h5 className="font-semibold text-foreground text-sm">Content Quality</h5>
+          <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-500">
+            {Math.round(contentScore)}% · Moderate
+          </span>
+        </div>
+
+        <div className="flex items-start gap-4 mb-4">
+          <div className="relative shrink-0 w-[72px] h-[72px]">
+            <ScoreRing score={Math.round(contentScore)} colorClass="text-amber-500" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-sm font-bold text-foreground">{Math.round(contentScore)}%</span>
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-foreground mb-0.5">
+              {result.content_quality_detailed?.quality_label ?? "Low Quality"}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Content shows some quality indicators but lacks full evidence or neutral tone. Verify claims independently.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          <div className="flex items-start gap-2">
+            <CheckCheck className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-foreground">
+              {credIndicator > 50 ? "Reasonable structure and organization" : "Some structured elements present"}
+            </span>
+          </div>
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-muted-foreground">
+              {evidenceScore < 50 ? "Limited supporting evidence or references" : "Partial evidence provided"}
+            </span>
+          </div>
+          {isHighTone && (
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+              <span className="text-xs text-muted-foreground">Emotional language may affect objectivity</span>
+            </div>
+          )}
+          {grammarIssues > 0 && (
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+              <span className="text-xs text-muted-foreground">{grammarIssues} grammar issue{grammarIssues > 1 ? "s" : ""} detected</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2.5 pt-3 border-t border-border/50">
+          <FactorBar label="Readability" value={readability} color="bg-sky-500" detail={`${readability}%`} />
+          <FactorBar label="Specificity" value={specificity} color="bg-amber-500"
+            detail={result.content_quality_detailed?.specificity_label ?? `${specificity}%`} />
+          <FactorBar label="Evidence Strength" value={evidenceScore} color="bg-amber-400"
+            detail={result.content_quality_detailed?.evidence_strength_label ?? `${evidenceScore}%`} />
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-border/50 grid grid-cols-2 gap-x-4 gap-y-2">
+          {[
+            { label: "Avg. Sentence", value: `${avgSentLen} words` },
+            { label: "Tone", value: sentimentLabel, color: isHighTone ? "text-amber-500" : "text-foreground" },
+            { label: "Grammar", value: grammarIssues === 0 ? "Clean" : `${grammarIssues} issue${grammarIssues > 1 ? "s" : ""}`, color: grammarIssues > 2 ? "text-rose-500" : "text-amber-500" },
+            { label: "Clickbait", value: clickbait < 25 ? "Low" : clickbait < 50 ? "Moderate" : "High", color: clickbait > 50 ? "text-rose-500" : clickbait > 25 ? "text-amber-500" : "text-foreground" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{label}</span>
+              <span className={`text-xs font-semibold ${color || "text-foreground"}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    )
+  }
+
+  // ── LOW quality ────────────────────────────────────────────────────────
+  return (
+    <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
+      <div className="flex items-center gap-2 mb-4">
+        <FileText className="w-4 h-4 text-rose-500" />
+        <h5 className="font-semibold text-foreground text-sm">Content Quality</h5>
+        <span className="ml-auto px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400">
+          {Math.round(contentScore)}% · Low
+        </span>
+      </div>
+
+      <div className="flex items-start gap-4 mb-4">
+        <div className="relative shrink-0 w-[72px] h-[72px]">
+          <ScoreRing score={Math.round(contentScore)} colorClass="text-rose-500" />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-sm font-bold text-foreground">{Math.round(contentScore)}%</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-foreground mb-0.5">
+            {result.content_quality_detailed?.quality_label ?? "Poor"}
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            The article contains multiple indicators of poor quality and potential misinformation.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-2 mb-4">
+        {[
+          credIndicator < 40 ? "Weak or disorganized structure" : "Structure shows some issues",
+          grammarIssues > 2 ? "Poor grammar or inconsistent writing" : grammarIssues > 0 ? "Minor grammar issues detected" : "Grammar appears acceptable",
+          specificity < 30 ? "Information is vague, exaggerated, or misleading" : "Specificity is low",
+          evidenceScore < 30 ? "Little to no supporting evidence" : "Insufficient evidence provided",
+          isHighTone ? "Emotional or sensational tone detected" : "Tone may affect objectivity",
+          isClickbait ? "Presence of clickbait language" : "Some sensational indicators present",
+        ].map((item, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+            <span className="text-xs text-foreground">{item}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="space-y-2.5 pt-3 border-t border-border/50">
+        <FactorBar label="Readability" value={readability} color="bg-rose-400" detail={`${readability}%`} />
+        <FactorBar label="Specificity" value={specificity} color="bg-rose-400"
+          detail={result.content_quality_detailed?.specificity_label ?? `${specificity}%`} />
+        <FactorBar label="Evidence Strength" value={evidenceScore} color="bg-rose-500"
+          detail={result.content_quality_detailed?.evidence_strength_label ?? `${evidenceScore}%`} />
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-border/50 grid grid-cols-2 gap-x-4 gap-y-2">
+        {[
+          { label: "Avg. Sentence", value: `${avgSentLen} words` },
+          { label: "Tone", value: sentimentLabel, color: isHighTone ? "text-rose-500" : "text-foreground" },
+          { label: "Grammar", value: grammarIssues === 0 ? "Clean" : `${grammarIssues} issue${grammarIssues > 1 ? "s" : ""}`, color: grammarIssues > 2 ? "text-rose-500" : grammarIssues > 0 ? "text-amber-500" : "text-foreground" },
+          { label: "Clickbait", value: clickbait < 25 ? "Low" : clickbait < 50 ? "Moderate" : "High", color: clickbait > 50 ? "text-rose-500" : clickbait > 25 ? "text-amber-500" : "text-foreground" },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{label}</span>
+            <span className={`text-xs font-semibold ${color || "text-foreground"}`}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+// ── Final Takeaway Banner ──────────────────────────────────────────────────
+function FinalTakeaway({
+  verdict,
+  credScore,
+  contentScore,
+  hasSource,
+  confidence,
+}: {
+  verdict: string
+  credScore: number
+  contentScore: number
+  hasSource: boolean
+  confidence: number
+}) {
+  const sourceTier = getSourceCredTier(credScore / 100, verdict, hasSource)
+  const contentTier = getContentQualityTier(contentScore / 100, verdict)
+
+  let icon = <Info className="w-4 h-4 shrink-0 mt-0.5" />
+  let bg = "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800"
+  let textColor = "text-blue-700 dark:text-blue-300"
+  let message = ""
+
+  if (verdict === "REAL" && sourceTier === "high" && contentTier === "high") {
+    icon = <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+    bg = "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
+    textColor = "text-emerald-700 dark:text-emerald-300"
+    message = `This article appears credible (${confidence}% confidence). The source is trusted and the content is well-supported. You may rely on this information, but always cross-check critical claims.`
+  } else if (verdict === "FAKE" || (sourceTier === "low" && contentTier === "low")) {
+    icon = <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+    bg = "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800"
+    textColor = "text-rose-700 dark:text-rose-300"
+    message = `This article shows strong indicators of misinformation (${confidence}% confidence). The source and content quality are both low. Do not share without independent verification from trusted news outlets.`
+  } else if (sourceTier === "none") {
+    icon = <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+    bg = "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
+    textColor = "text-amber-700 dark:text-amber-400"
+    message = `No identifiable source was found. Even if the content quality seems acceptable, the lack of a verifiable source means this information should be treated with caution and verified independently.`
+  } else if (verdict === "UNVERIFIED") {
+    icon = <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+    bg = "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
+    textColor = "text-amber-700 dark:text-amber-400"
+    message = `This article could not be fully verified (${confidence}% confidence). Some signals suggest credibility while others raise concerns. Seek confirmation from multiple trusted sources before drawing conclusions.`
+  } else {
+    message = `Mixed credibility signals detected. Source reliability is ${sourceTier} and content quality is ${contentTier}. Cross-reference with trusted news outlets before relying on this information.`
+  }
+
+  return (
+    <div className={`rounded-xl border p-4 ${bg}`}>
+      <div className="flex items-start gap-2.5">
+        {icon}
+        <div>
+          <p className={`text-xs font-semibold mb-0.5 ${textColor}`}>Final Takeaway</p>
+          <p className={`text-xs leading-relaxed ${textColor}`}>{message}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main export ─────────────────────────────────────────────────────────────
 export default function ResultsDisplay({ result, inputContent }: ResultsDisplayProps) {
   if (result.verdict === "ERROR") {
     return (
@@ -225,42 +813,39 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
     contentScore = Math.max(40, Math.min(60, rawContent))
   }
 
-  const readability = Math.round((result.content_quality_detailed?.readability_score ?? 0.5) * 100)
-  const specificity = Math.round((result.content_quality_detailed?.specificity_score ?? 0.4) * 100)
-  const evidenceScore = Math.round((result.content_quality_detailed?.evidence_strength_score ?? 0.5) * 100)
-  const clickbait = Math.round((result.clickbait_score ?? 0) * 100)
-  const credIndicator = Math.round((result.credibility_indicators?.score ?? 0.5) * 100)
-  const issues = result.credibility_indicators?.issues ?? []
-  const biasRating = result.source_credibility_detailed?.bias_rating ?? "Unable to determine"
-  const grammarIssues = result.content_quality_detailed?.grammar_issues?.length ?? 0
-  const avgSentLen = result.content_quality_detailed?.structure?.avg_sentence_length ?? 0
-
-
+  const sourceLabel = result.source_label || ""
+  const hasSource =
+    sourceLabel.toLowerCase().includes("verified") ||
+    sourceLabel.toLowerCase().includes("suggested") ||
+    (result.source_credibility || 0) > 0
 
   return (
     <div className="space-y-4">
 
-      {/* VERDICT CARD — compact */}
+      {/* VERDICT CARD */}
       <Card className={`border-2 ${cfg.border} ${cfg.cardBg}`}>
-        <div className="p-4">
+        <div className="p-5">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2.5">
               <VerdictIcon className={`w-5 h-5 shrink-0 ${cfg.textColor}`} />
               <h3 className={`text-lg font-bold ${cfg.textColor}`}>{cfg.label}</h3>
+              {result.ml_enhanced && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-medium">
+                  AI Enhanced
+                </span>
+              )}
             </div>
-            <span className={`text-xl font-bold ${cfg.textColor}`}>{result.confidence_score}%</span>
+            <span className={`text-2xl font-bold ${cfg.textColor}`}>{result.confidence_score}%</span>
           </div>
           <div className="h-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mb-3">
-            <div
-              className={`h-full rounded-full transition-all duration-700 ${cfg.barColor}`}
-              style={{ width: `${result.confidence_score}%` }}
-            />
+            <div className={`h-full rounded-full transition-all duration-700 ${cfg.barColor}`}
+              style={{ width: `${result.confidence_score}%` }} />
           </div>
           <p className="text-sm text-foreground leading-relaxed">{result.explanation}</p>
         </div>
       </Card>
 
-      {/* DYNAMIC SOURCE LINKS */}
+      {/* SOURCE LINKS */}
       <DynamicSourceLinks
         links={result.source_links ?? []}
         verdict={result.verdict}
@@ -270,146 +855,23 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
 
       {/* METRICS GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Source Credibility card */}
-        <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-4">
-            <Globe className="w-4 h-4 text-blue-500" />
-            <h5 className="font-semibold text-foreground text-sm">Source Credibility</h5>
-          </div>
-          <div className="flex items-start gap-4">
-            <div className="relative shrink-0 w-[68px] h-[68px]">
-              <ScoreRing score={Math.round(credScore)} colorClass="text-blue-500" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-bold text-foreground">{Math.round(credScore)}%</span>
-              </div>
-            </div>
-            <div className="flex-1 space-y-3 min-w-0">
-              <div>
-                <p className="text-xs font-semibold text-foreground">
-                  {result.source_credibility_detailed?.credibility_label ?? "Uncertain"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {result.source_label || "Source analysis complete"}
-                </p>
-              </div>
-              {result.source_credibility_detailed?.domain_authority != null && (
-                <FactorBar
-                  label="Domain Authority"
-                  value={Math.round((result.source_credibility_detailed.domain_authority ?? 0) * 100)}
-                  color="bg-blue-500"
-                />
-              )}
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Bias Rating</span>
-                <span className={`text-xs font-semibold ${
-                  biasRating.includes("leaning") ? "text-orange-500" :
-                  biasRating === "Neutral" ? "text-emerald-600 dark:text-emerald-400" :
-                  "text-muted-foreground"
-                }`}>
-                  {biasRating}
-                </span>
-              </div>
-              {result.source_credibility_detailed?.bias_indicators?.slice(0, 2).map((ind, i) => (
-                <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                  <span className="shrink-0 mt-1">•</span>{ind}
-                </p>
-              ))}
-            </div>
-          </div>
-
-          {result.source_credibility_detailed?.api_checks && result.source_credibility_detailed.api_checks.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-border/50">
-              <p className="text-xs text-muted-foreground mb-2">Verification checks</p>
-              <div className="flex flex-wrap gap-2">
-                {result.source_credibility_detailed.api_checks.map((chk: any, i: number) => (
-                  <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${
-                    chk.status === "Found" || (typeof chk.score === "number" && chk.score > 0.5)
-                      ? "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
-                      : "bg-gray-100 dark:bg-gray-800 text-muted-foreground border-border"
-                  }`}>
-                    <CheckCircle2 className="w-3 h-3" />
-                    {chk.api}{chk.rating ? `: ${chk.rating}` : ""}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </Card>
-
-        {/* Content Quality card */}
-        <Card className="p-5 bg-card dark:bg-slate-800 border dark:border-slate-700">
-          <div className="flex items-center gap-2 mb-4">
-            <FileText className="w-4 h-4 text-purple-500" />
-            <h5 className="font-semibold text-foreground text-sm">Content Quality</h5>
-          </div>
-          <div className="flex items-start gap-4">
-            <div className="relative shrink-0 w-[68px] h-[68px]">
-              <ScoreRing score={Math.round(contentScore)} colorClass="text-purple-500" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-bold text-foreground">{Math.round(contentScore)}%</span>
-              </div>
-            </div>
-            <div className="flex-1 space-y-3 min-w-0">
-              <div>
-                <p className="text-xs font-semibold text-foreground">
-                  {result.content_quality_detailed?.quality_label ?? "Neutral"}
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Avg. sentence length: {avgSentLen} words
-                </p>
-              </div>
-              <FactorBar label="Readability" value={readability} color="bg-sky-500" detail={`${readability}%`} />
-              <FactorBar
-                label="Specificity"
-                value={specificity}
-                color="bg-violet-500"
-                detail={result.content_quality_detailed?.specificity_label ?? `${specificity}%`}
-              />
-              <FactorBar
-                label="Evidence Strength"
-                value={evidenceScore}
-                color="bg-purple-500"
-                detail={result.content_quality_detailed?.evidence_strength_label ?? `${evidenceScore}%`}
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-border/50 grid grid-cols-2 gap-x-4 gap-y-2">
-            {[
-              {
-                label: "Clickbait",
-                value: clickbait < 25 ? "Low" : clickbait < 50 ? "Moderate" : "High",
-                color: clickbait > 50 ? "text-rose-500" : clickbait > 25 ? "text-amber-500" : "text-emerald-600 dark:text-emerald-400",
-              },
-              {
-                label: "Tone",
-                value: result.sentiment_label ?? "Neutral",
-                color: "text-foreground",
-              },
-              {
-                label: "Grammar",
-                value: grammarIssues === 0 ? "Clean" : `${grammarIssues} issue${grammarIssues > 1 ? "s" : ""}`,
-                color: grammarIssues === 0 ? "text-emerald-600 dark:text-emerald-400" : grammarIssues < 3 ? "text-amber-500" : "text-rose-500",
-              },
-              {
-                label: "Structure",
-                value: credIndicator > 70 ? "Good" : credIndicator > 45 ? "Fair" : "Weak",
-                color: "text-foreground",
-              },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{label}</span>
-                <span className={`text-xs font-semibold ${color}`}>{value}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <SourceCredibilityCard result={result} credScore={credScore} verdict={result.verdict} />
+        <ContentQualityCard result={result} contentScore={contentScore} verdict={result.verdict} />
       </div>
 
-      {/* FACT-CHECK RESULTS */}
+      {/* FACT-CHECKS */}
       {result.fact_check_results && result.fact_check_results.length > 0 && (
         <FactCheckSection checks={result.fact_check_results} />
       )}
+
+      {/* FINAL TAKEAWAY */}
+      <FinalTakeaway
+        verdict={result.verdict}
+        credScore={credScore}
+        contentScore={contentScore}
+        hasSource={hasSource}
+        confidence={result.confidence_score}
+      />
     </div>
   )
 }
@@ -435,20 +897,15 @@ function DynamicSourceLinks({
   const cardStyle = isReal
     ? "bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800"
     : "bg-blue-50 dark:bg-slate-800 border border-blue-200 dark:border-slate-700"
-
-  const headingStyle = isReal
-    ? "text-emerald-900 dark:text-emerald-300"
-    : "text-foreground"
+  const headingStyle = isReal ? "text-emerald-900 dark:text-emerald-300" : "text-foreground"
 
   return (
     <Card className={`p-5 ${cardStyle}`}>
-      {/* Header */}
       <div className="flex items-start justify-between gap-2 mb-3 flex-wrap">
         <h4 className={`font-semibold flex items-center gap-2 ${headingStyle}`}>
           {isReal
             ? <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            : <Globe className="w-4 h-4 text-blue-500" />
-          }
+            : <Globe className="w-4 h-4 text-blue-500" />}
           {headerText}
         </h4>
         {topicLabel && (
@@ -458,34 +915,23 @@ function DynamicSourceLinks({
         )}
       </div>
 
-      {/* Empty state */}
       {links.length === 0 ? (
         <div className="rounded-xl border border-dashed border-muted-foreground/30 bg-muted/20 p-5 text-center space-y-1.5">
           <Info className="w-4 h-4 text-muted-foreground mx-auto" />
-          <p className="text-sm font-medium text-muted-foreground">
-            No related trusted sources found for this article.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Verify this information manually from reputable news outlets.
-          </p>
+          <p className="text-sm font-medium text-muted-foreground">No related trusted sources found for this article.</p>
+          <p className="text-xs text-muted-foreground">Verify this information manually from reputable news outlets.</p>
         </div>
       ) : (
         <div className="space-y-2">
           {links.map((src, idx) => {
             const isArticle = !!src.article_url
-
             return (
-              <a
-                key={idx}
-                href={src.url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <a key={idx} href={src.url} target="_blank" rel="noopener noreferrer"
                 className={`group flex items-center justify-between p-3 rounded-xl border transition-all duration-150 ${
                   isReal
                     ? "bg-white dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 hover:border-emerald-400 hover:shadow-sm"
                     : "bg-white dark:bg-slate-900 border-blue-200 dark:border-slate-600 hover:border-blue-400 hover:shadow-sm"
-                }`}
-              >
+                }`}>
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
                     isReal ? "bg-emerald-100 dark:bg-emerald-900/40" : "bg-blue-100 dark:bg-slate-800"
@@ -496,7 +942,6 @@ function DynamicSourceLinks({
                     <p className={`text-sm font-medium truncate ${
                       isReal ? "text-emerald-700 dark:text-emerald-300" : "text-blue-700 dark:text-blue-300"
                     }`}>{src.name}</p>
-                    {/* Show actual article title if available, else generic label */}
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {isArticle ? "Related article found" : "Search results page"}
                     </p>
@@ -529,21 +974,12 @@ function FactCheckSection({ checks }: { checks: FactCheck[] }) {
 
       <div className="space-y-2">
         {checks.slice(0, 4).map((check, idx) => {
-          const validLink =
-            check.source &&
-            check.source !== "Source not identified" &&
-            check.source.startsWith("http")
+          const validLink = check.source && check.source !== "Source not identified" && check.source.startsWith("http")
           const isExpanded = expanded === idx
-
           return (
-            <div
-              key={idx}
-              className="rounded-xl border border-border bg-background dark:bg-slate-900 overflow-hidden"
-            >
-              <button
-                onClick={() => setExpanded(isExpanded ? null : idx)}
-                className="w-full text-left p-4 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors"
-              >
+            <div key={idx} className="rounded-xl border border-border bg-background dark:bg-slate-900 overflow-hidden">
+              <button onClick={() => setExpanded(isExpanded ? null : idx)}
+                className="w-full text-left p-4 flex items-start justify-between gap-3 hover:bg-muted/30 transition-colors">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                     <ConclusionBadge text={check.conclusion} />
@@ -564,19 +1000,11 @@ function FactCheckSection({ checks }: { checks: FactCheck[] }) {
                 <div className="px-4 pb-4 border-t border-border/50 space-y-3">
                   <p className="text-xs text-muted-foreground leading-relaxed pt-3">{check.conclusion}</p>
                   {check.relevance > 0 && (
-                    <FactorBar
-                      label="Relevance to your content"
-                      value={Math.round(check.relevance * 100)}
-                      color="bg-indigo-500"
-                    />
+                    <FactorBar label="Relevance to your content" value={Math.round(check.relevance * 100)} color="bg-indigo-500" />
                   )}
                   {validLink ? (
-                    <a
-                      href={check.source}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-                    >
+                    <a href={check.source} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline">
                       <ExternalLink className="w-3.5 h-3.5" />
                       Read article on {check.source_label || check.reviewer || "source"}
                     </a>
