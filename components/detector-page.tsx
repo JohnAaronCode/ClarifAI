@@ -40,28 +40,33 @@ interface HistoryItem {
 const VERDICT_DISPLAY = {
   REAL: {
     label: "Credible",
-    bg: "bg-emerald-100 dark:bg-emerald-900/30",
+    bg: "bg-emerald-100 dark:bg-emerald-900/40",
     text: "text-emerald-700 dark:text-emerald-400",
-    border: "border-emerald-200 dark:border-emerald-800",
+    border: "border-emerald-200 dark:border-emerald-700",
     icon: ShieldCheck,
     dot: "bg-emerald-500",
   },
   FAKE: {
     label: "Likely False",
-    bg: "bg-rose-100 dark:bg-rose-900/30",
+    bg: "bg-rose-100 dark:bg-rose-900/40",
     text: "text-rose-700 dark:text-rose-400",
-    border: "border-rose-200 dark:border-rose-800",
+    border: "border-rose-200 dark:border-rose-700",
     icon: ShieldAlert,
     dot: "bg-rose-500",
   },
   UNVERIFIED: {
     label: "Unverified",
-    bg: "bg-amber-100 dark:bg-amber-900/30",
-    text: "text-amber-700 dark:text-amber-600",
-    border: "border-amber-200 dark:border-amber-800",
+    bg: "bg-amber-100 dark:bg-amber-900/40",
+    text: "text-amber-700 dark:text-amber-400",
+    border: "border-amber-200 dark:border-amber-700",
     icon: ShieldQuestion,
     dot: "bg-amber-500",
   },
+}
+
+// ── Stable content fingerprint for deduplication ───────────────────────────
+function makeContentKey(content: string): string {
+  return content.trim().toLowerCase().replace(/\s+/g, " ").substring(0, 300)
 }
 
 export default function DetectorPage() {
@@ -85,12 +90,16 @@ export default function DetectorPage() {
       setResult(data)
 
       if (data.verdict !== "ERROR") {
-        const history = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
-        const existingIndex = history.findIndex(
-          (item: HistoryItem) => item.content_preview === content.substring(0, 200)
+        // ── Deduplication: remove any existing entry with the same content ──
+        const history: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+        const contentKey = makeContentKey(content)
+
+        const deduplicated = history.filter(
+          (item) => makeContentKey(item.content_preview) !== contentKey
         )
+
         const newEntry: HistoryItem = {
-          id: existingIndex >= 0 ? history[existingIndex].id : Date.now().toString(),
+          id: Date.now().toString(),
           input_type: type,
           content_preview: content.substring(0, 200),
           verdict: data.verdict,
@@ -102,9 +111,11 @@ export default function DetectorPage() {
           fact_check_results: data.fact_check_results,
           created_at: new Date().toISOString(),
         }
-        if (existingIndex >= 0) history.splice(existingIndex, 1)
-        history.unshift(newEntry)
-        localStorage.setItem("analysisHistory", JSON.stringify(history))
+
+        // New entry goes to top
+        deduplicated.unshift(newEntry)
+        // Keep max 50 entries
+        localStorage.setItem("analysisHistory", JSON.stringify(deduplicated.slice(0, 50)))
       }
     } catch (error) {
       console.error("Analysis error:", error)
@@ -119,24 +130,34 @@ export default function DetectorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col">
       <Navbar />
       <main className="max-w-4xl mx-auto px-4 py-8 flex-1 w-full">
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2 text-center">ClarifAI</h1>
-          <p className="text-center text-muted-foreground">News Credibility Analyzer</p>
+          <h1 className="text-4xl font-bold mb-2 text-center text-slate-900 dark:text-white">ClarifAI</h1>
+          <p className="text-center text-slate-500 dark:text-slate-400">News Credibility Analyzer</p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="detector">Content Credibility Analysis</TabsTrigger>
-            <TabsTrigger value="history">Analysis History</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 mb-6 bg-slate-200 dark:bg-slate-800">
+            <TabsTrigger
+              value="detector"
+              className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white text-slate-600 dark:text-slate-400"
+            >
+              Content Credibility Analysis
+            </TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white text-slate-600 dark:text-slate-400"
+            >
+              Analysis History
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="detector" className="space-y-6">
-            <Card className="p-6">
-              <h2 className="text-2xl font-semibold mb-2 text-center">Article Credibility Assessment</h2>
-              <p className="text-muted-foreground mb-6 text-center">
+            <Card className="p-6 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/60 shadow-sm">
+              <h2 className="text-2xl font-semibold mb-2 text-center text-slate-900 dark:text-white">Article Credibility Assessment</h2>
+              <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
                 Submit a news article or URL for credibility assessment and detailed analysis.
               </p>
               <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
@@ -175,9 +196,8 @@ function HistoryTab() {
   }
 
   useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
-    // Strip any entries with invalid/ERROR verdicts from old localStorage data
-    const valid = saved.filter((i: HistoryItem) =>
+    const saved: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+    const valid = saved.filter((i) =>
       i.verdict === "REAL" || i.verdict === "FAKE" || i.verdict === "UNVERIFIED"
     )
     setHistory(valid)
@@ -190,7 +210,10 @@ function HistoryTab() {
     if (activeFilter !== "ALL") result = result.filter(i => i.verdict === activeFilter)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      result = result.filter(i => i.content_preview.toLowerCase().includes(q) || i.explanation.toLowerCase().includes(q))
+      result = result.filter(i =>
+        i.content_preview.toLowerCase().includes(q) ||
+        i.explanation.toLowerCase().includes(q)
+      )
     }
     setFiltered(result)
   }, [history, activeFilter, searchQuery])
@@ -231,7 +254,7 @@ function HistoryTab() {
       <div className="flex items-center justify-center py-16">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading history...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading history...</p>
         </div>
       </div>
     )
@@ -239,10 +262,10 @@ function HistoryTab() {
 
   if (history.length === 0) {
     return (
-      <Card className="p-16 text-center">
-        <BarChart2 className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-        <p className="text-lg font-semibold text-foreground mb-1">No assessments yet</p>
-        <p className="text-sm text-muted-foreground">Start by analyzing some content to see your history here.</p>
+      <Card className="p-16 text-center bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/60">
+        <BarChart2 className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-4" />
+        <p className="text-lg font-semibold text-slate-800 dark:text-slate-200 mb-1">No assessments yet</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Start by analyzing some content to see your history here.</p>
       </Card>
     )
   }
@@ -255,26 +278,26 @@ function HistoryTab() {
       {/* ── Stats Overview ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Total Analyzed", value: stats.total, color: "text-foreground", sub: "articles", bg: "bg-muted/50" },
-          { label: "Credible", value: stats.real, color: "text-emerald-600 dark:text-emerald-400", sub: `${stats.total > 0 ? Math.round((stats.real / stats.total) * 100) : 0}% of total`, bg: "bg-emerald-50 dark:bg-emerald-950/30" },
-          { label: "Likely False", value: stats.fake, color: "text-rose-600 dark:text-rose-400", sub: `${stats.total > 0 ? Math.round((stats.fake / stats.total) * 100) : 0}% of total`, bg: "bg-rose-50 dark:bg-rose-950/30" },
-          { label: "Unverified", value: stats.unverified, color: "text-amber-600 dark:text-amber-500", sub: `${stats.total > 0 ? Math.round((stats.unverified / stats.total) * 100) : 0}% of total`, bg: "bg-amber-50 dark:bg-amber-950/30" },
+          { label: "Total Analyzed", value: stats.total, color: "text-slate-800 dark:text-white", sub: "articles", bg: "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/60" },
+          { label: "Credible", value: stats.real, color: "text-emerald-600 dark:text-emerald-400", sub: `${stats.total > 0 ? Math.round((stats.real / stats.total) * 100) : 0}% of total`, bg: "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800/60" },
+          { label: "Likely False", value: stats.fake, color: "text-rose-600 dark:text-rose-400", sub: `${stats.total > 0 ? Math.round((stats.fake / stats.total) * 100) : 0}% of total`, bg: "bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800/60" },
+          { label: "Unverified", value: stats.unverified, color: "text-amber-600 dark:text-amber-400", sub: `${stats.total > 0 ? Math.round((stats.unverified / stats.total) * 100) : 0}% of total`, bg: "bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800/60" },
         ].map(({ label, value, color, sub, bg }) => (
-          <Card key={label} className={`p-4 border ${bg}`}>
+          <Card key={label} className={`p-4 border shadow-sm ${bg}`}>
             <p className={`text-2xl font-bold ${color}`}>{value}</p>
-            <p className="text-xs font-semibold text-foreground mt-0.5">{label}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mt-0.5">{label}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{sub}</p>
           </Card>
         ))}
       </div>
 
       {/* Avg confidence banner */}
       {stats.total > 0 && (
-        <Card className="p-4 flex items-center gap-4 bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
+        <Card className="p-4 flex items-center gap-4 bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/60 shadow-sm">
           <TrendingUp className="w-5 h-5 text-blue-500 shrink-0" />
           <div className="flex-1">
-            <p className="text-xs text-muted-foreground">Average Credibility Score</p>
-            <div className="mt-1.5 h-1.5 w-full bg-blue-200 dark:bg-blue-900 rounded-full overflow-hidden">
+            <p className="text-xs text-slate-500 dark:text-slate-400">Average Credibility Score</p>
+            <div className="mt-1.5 h-1.5 w-full bg-blue-200 dark:bg-blue-900/60 rounded-full overflow-hidden">
               <div className="h-full bg-blue-500 rounded-full transition-all duration-500"
                 style={{ width: `${stats.avgConfidence}%` }} />
             </div>
@@ -286,19 +309,19 @@ function HistoryTab() {
       )}
 
       {/* ── Controls ───────────────────────────────────────────────────── */}
-      <Card className="p-4 space-y-3">
+      <Card className="p-4 space-y-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/60 shadow-sm">
         {/* Search */}
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
           <input
             type="text"
             placeholder="Search assessments..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
+            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
           />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -306,7 +329,7 @@ function HistoryTab() {
 
         {/* Filter pills */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           {(["ALL", "REAL", "FAKE", "UNVERIFIED"] as const).map(f => {
             const countKey = f.toLowerCase() as "real" | "fake" | "unverified"
             const count = f === "ALL" ? stats.total : (stats[countKey] ?? 0)
@@ -320,13 +343,13 @@ function HistoryTab() {
                   isActive
                     ? cfg
                       ? `${cfg.bg} ${cfg.text} ${cfg.border}`
-                      : "bg-foreground text-background border-foreground"
-                    : "bg-muted/50 text-muted-foreground border-border hover:border-foreground/30"
+                      : "bg-slate-800 dark:bg-white text-white dark:text-slate-900 border-slate-800 dark:border-white"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-500"
                 }`}
               >
                 {cfg && isActive && <cfg.icon className="w-3 h-3" />}
                 {f === "ALL" ? "All" : VERDICT_DISPLAY[f].label}
-                <span className={`px-1.5 py-0.5 rounded-full text-xs ${isActive ? "bg-white/30" : "bg-muted"}`}>
+                <span className={`px-1.5 py-0.5 rounded-full text-xs ${isActive ? "bg-black/10 dark:bg-white/20" : "bg-slate-200 dark:bg-slate-700"}`}>
                   {count}
                 </span>
               </button>
@@ -335,10 +358,10 @@ function HistoryTab() {
         </div>
 
         {/* Bulk actions */}
-        <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/50">
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-200 dark:border-slate-700/60">
           <button
             onClick={toggleSelectAll}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition"
+            className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition"
           >
             {allSelected
               ? <CheckSquare className="w-3.5 h-3.5 text-blue-500" />
@@ -348,19 +371,19 @@ function HistoryTab() {
 
           <div className="flex items-center gap-2">
             {selectedItems.size > 0 && (
-              <span className="text-xs text-muted-foreground">{selectedItems.size} selected</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">{selectedItems.size} selected</span>
             )}
             <button
               onClick={deleteSelected}
               disabled={selectedItems.size === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800 hover:bg-rose-200 dark:hover:bg-rose-900/50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 hover:bg-rose-200 dark:hover:bg-rose-900/60 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
               <Trash2 className="w-3 h-3" />
               Delete selected
             </button>
             <button
               onClick={clearAll}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-muted text-muted-foreground border border-border hover:bg-muted/80 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
             >
               <X className="w-3 h-3" />
               Clear all
@@ -371,17 +394,17 @@ function HistoryTab() {
 
       {/* ── Results count ─────────────────────────────────────────────── */}
       {filtered.length !== history.length && (
-        <p className="text-xs text-muted-foreground px-1">
+        <p className="text-xs text-slate-500 dark:text-slate-400 px-1">
           Showing {filtered.length} of {history.length} assessments
         </p>
       )}
 
       {/* ── History list ──────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
-        <Card className="p-10 text-center">
-          <Search className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm font-medium text-foreground">No matching assessments</p>
-          <p className="text-xs text-muted-foreground mt-1">Try adjusting your search or filter.</p>
+        <Card className="p-10 text-center bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/60">
+          <Search className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+          <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No matching assessments</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Try adjusting your search or filter.</p>
         </Card>
       ) : (
         <div className="space-y-2">
@@ -395,8 +418,10 @@ function HistoryTab() {
             return (
               <Card
                 key={item.id}
-                className={`overflow-hidden transition-all border ${
-                  isSelected ? "border-blue-400 dark:border-blue-600 shadow-sm" : "border-border hover:border-border/80"
+                className={`overflow-hidden transition-all bg-white dark:bg-slate-900 shadow-sm ${
+                  isSelected
+                    ? "border-blue-400 dark:border-blue-500 shadow-blue-100 dark:shadow-blue-900/20"
+                    : "border-slate-200 dark:border-slate-700/60 hover:border-slate-300 dark:hover:border-slate-600"
                 }`}
               >
                 {/* Main row */}
@@ -404,7 +429,7 @@ function HistoryTab() {
                   {/* Checkbox */}
                   <button
                     onClick={() => toggleSelect(item.id)}
-                    className="mt-0.5 shrink-0 text-muted-foreground hover:text-blue-500 transition"
+                    className="mt-0.5 shrink-0 text-slate-400 hover:text-blue-500 transition"
                   >
                     {isSelected
                       ? <CheckSquare className="w-4 h-4 text-blue-500" />
@@ -413,11 +438,11 @@ function HistoryTab() {
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground line-clamp-2 mb-2 leading-snug">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 mb-2 leading-snug">
                       {item.content_preview}
                     </p>
 
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
@@ -426,8 +451,8 @@ function HistoryTab() {
                       </span>
                       <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full font-medium uppercase tracking-wide ${
                         item.input_type === "url"
-                          ? "bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400"
-                          : "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
+                          ? "bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400"
+                          : "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400"
                       }`}>
                         {item.input_type === "url"
                           ? <Link2 className="w-2.5 h-2.5" />
@@ -444,14 +469,14 @@ function HistoryTab() {
                       {cfg.label}
                     </span>
                     <div className="text-right">
-                      <span className="text-lg font-bold text-foreground">{item.confidence_score}%</span>
-                      <p className="text-xs text-muted-foreground">credibility</p>
+                      <span className="text-lg font-bold text-slate-800 dark:text-white">{item.confidence_score}%</span>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">credibility</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Mini confidence bar */}
-                <div className="h-1 w-full bg-gray-100 dark:bg-gray-800">
+                <div className="h-0.5 w-full bg-slate-100 dark:bg-slate-800">
                   <div
                     className={`h-full transition-all duration-500 ${
                       item.verdict === "REAL" ? "bg-emerald-400" :
@@ -464,7 +489,7 @@ function HistoryTab() {
                 {/* Expand button */}
                 <button
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                  className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30 transition border-t border-border/30"
+                  className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition border-t border-slate-100 dark:border-slate-800"
                 >
                   {isExpanded ? "Hide details" : "Show details"}
                   <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
@@ -472,30 +497,29 @@ function HistoryTab() {
 
                 {/* Expanded details */}
                 {isExpanded && (
-                  <div className="px-4 pb-4 pt-3 border-t border-border/50 bg-muted/20 space-y-3">
+                  <div className="px-4 pb-4 pt-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
                     <div>
-                      <p className="text-xs font-semibold text-foreground mb-1">Assessment Summary</p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{item.explanation}</p>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Assessment Summary</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{item.explanation}</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       {item.source_credibility !== undefined && (
-                        <div className="rounded-lg bg-background dark:bg-slate-900 border border-border p-3">
-                          <p className="text-xs text-muted-foreground mb-0.5">Source Credibility</p>
-                          <p className="text-sm font-bold text-foreground">{item.source_credibility}%</p>
+                        <div className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">Source Credibility</p>
+                          <p className="text-sm font-bold text-slate-800 dark:text-white">{item.source_credibility}%</p>
                         </div>
                       )}
                       {item.sentiment_score !== undefined && (
-                        <div className="rounded-lg bg-background dark:bg-slate-900 border border-border p-3">
-                          <p className="text-xs text-muted-foreground mb-0.5">Sentiment Score</p>
-                          <p className="text-sm font-bold text-foreground">{Math.round(item.sentiment_score * 100)}%</p>
+                        <div className="rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-3">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">Sentiment Score</p>
+                          <p className="text-sm font-bold text-slate-800 dark:text-white">{Math.round(item.sentiment_score * 100)}%</p>
                         </div>
                       )}
                     </div>
 
-                    {/* Verdict-specific contextual note */}
                     {item.verdict === "FAKE" && (
-                      <div className="rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 p-3 flex items-start gap-2">
+                      <div className="rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 p-3 flex items-start gap-2">
                         <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
                         <p className="text-xs text-rose-700 dark:text-rose-400">
                           This content showed strong indicators of misinformation. Do not share without independent verification.
@@ -503,7 +527,7 @@ function HistoryTab() {
                       </div>
                     )}
                     {item.verdict === "REAL" && (
-                      <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 p-3 flex items-start gap-2">
+                      <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 p-3 flex items-start gap-2">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
                         <p className="text-xs text-emerald-700 dark:text-emerald-400">
                           This content appeared credible at the time of assessment. Always verify with primary sources.
@@ -511,9 +535,9 @@ function HistoryTab() {
                       </div>
                     )}
                     {item.verdict === "UNVERIFIED" && (
-                      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-3 flex items-start gap-2">
+                      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 p-3 flex items-start gap-2">
                         <Info className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                        <p className="text-xs text-amber-700 dark:text-amber-500">
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
                           Could not be fully verified. Seek confirmation from multiple trusted sources.
                         </p>
                       </div>

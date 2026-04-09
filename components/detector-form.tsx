@@ -21,43 +21,62 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   const [articleError, setArticleError] = useState("")
   const [urlError, setUrlError] = useState("")
 
+  // ── Detect if input looks like a URL ──────────────────────────────────
+  function looksLikeUrl(text: string): boolean {
+    const trimmed = text.trim()
+    return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed) || /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed)
+  }
+
+  // ── Article tab validation ─────────────────────────────────────────────
   const validateArticleInput = (text: string): { isValid: boolean; error: string } => {
     const trimmed = text.trim()
-    
-    if (!trimmed) {
-      return { isValid: false, error: "" }
+
+    if (!trimmed) return { isValid: false, error: "" }
+
+    // Looks like a URL pasted in the wrong tab
+    if (looksLikeUrl(trimmed)) {
+      return {
+        isValid: false,
+        error: "This looks like a URL. Please switch to the URL tab to analyze a link.",
+      }
     }
-    
+
     if (trimmed.length < 30) {
-      return { isValid: false, error: "Content is too short. Please provide at least 30 characters." }
+      return { isValid: false, error: "Content is too short. Please paste a full article or at least a few sentences." }
     }
 
-    const wordCount = trimmed.split(/\s+/).length
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length
     if (wordCount < 5) {
-      return { isValid: false, error: "Please provide at least 5 words of meaningful content." }
+      return { isValid: false, error: "Please paste a full article or more text to analyze." }
     }
 
-    // Check for repetitive content
-    const words = trimmed.toLowerCase().split(/\s+/).filter((w) => w.length > 0)
-    const uniqueWords = new Set(words)
-    const uniqueRatio = uniqueWords.size / words.length
-
+    const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
+    const uniqueRatio = new Set(words).size / words.length
     if (uniqueRatio < 0.4) {
-      return { isValid: false, error: "The content seems repetitive. Please provide more varied text." }
+      return { isValid: false, error: "The content seems too repetitive. Please provide a real article with varied text." }
     }
 
     return { isValid: true, error: "" }
   }
 
+  // ── URL tab validation ─────────────────────────────────────────────────
   const validateUrlInput = (url: string): { isValid: boolean; error: string } => {
     const trimmed = url.trim()
-    
-    if (!trimmed) {
-      return { isValid: false, error: "" }
+
+    if (!trimmed) return { isValid: false, error: "" }
+
+    // Looks like plain text pasted in the wrong tab
+    if (!looksLikeUrl(trimmed)) {
+      return {
+        isValid: false,
+        error: "This looks like article text, not a URL. Please switch to the Article Content tab.",
+      }
     }
 
     try {
-      new URL(trimmed)
+      // Auto-prefix if missing scheme
+      const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+      new URL(withScheme)
       return { isValid: true, error: "" }
     } catch {
       return { isValid: false, error: "Please enter a valid URL (e.g., https://example.com/article)" }
@@ -81,7 +100,10 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
       return
     }
     setUrlError("")
-    onAnalyze(urlInput, "url")
+    // Normalize URL before sending
+    const trimmed = urlInput.trim()
+    const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+    onAnalyze(normalized, "url")
   }
 
   const handleArticleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -100,11 +122,13 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
 
   const handleClearArticle = () => {
     setArticleText("")
+    setArticleError("")
     onClearResult()
   }
 
   const handleClearUrl = () => {
     setUrlInput("")
+    setUrlError("")
     onClearResult()
   }
 
@@ -142,14 +166,6 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
             </div>
           )}
 
-          {articleText && !articleError && (
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-              <p className="text-sm text-blue-600 dark:text-blue-400">
-                {articleText.length} characters | {articleText.trim().split(/\s+/).length} words
-              </p>
-            </div>
-          )}
-
           <Button
             onClick={handleArticleSubmit}
             disabled={loading || !articleText.trim()}
@@ -171,7 +187,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           <div className="relative">
             <Input
               type="url"
-              placeholder="Enter an article URL to assess credibility"
+              placeholder="Enter an article URL (e.g., https://rappler.com/article)"
               value={urlInput}
               onChange={handleUrlChange}
               className={`pr-10 ${urlError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
@@ -190,12 +206,6 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
           {urlError && (
             <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <p className="text-sm text-red-600 dark:text-red-400">{urlError}</p>
-            </div>
-          )}
-
-          {urlInput && !urlError && (
-            <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3">
-              <p className="text-sm text-green-600 dark:text-green-400">URL format is valid</p>
             </div>
           )}
 

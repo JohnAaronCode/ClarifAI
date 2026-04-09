@@ -1,6 +1,7 @@
 // lib/ml-utils.ts
-// Primary ML engine: Groq (free, fast)
-// Fallback: OpenAI GPT-4o mini → Heuristic
+// Primary ML engine: Flask ML model (your trained model.pkl)
+// AI analysis: Groq (free, fast) → OpenAI GPT-4o mini fallback
+// Last resort: Heuristic
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface SentimentResult {
@@ -19,6 +20,45 @@ interface EnsembleResult {
     sentiment: string
     writing_quality: string
   } | null
+}
+
+// ── Flask ML Server URL ────────────────────────────────────────────────────
+const ML_API_URL = process.env.ML_API_URL || "http://localhost:5000"
+
+// ── Get prediction from your trained model.pkl via Flask ──────────────────
+async function getMLPrediction(text: string): Promise<{
+  verdict: "REAL" | "FAKE" | null
+  confidence: number | null
+}> {
+  try {
+    const res = await fetch(`${ML_API_URL}/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text.substring(0, 5000) }),
+      signal: AbortSignal.timeout(8000),
+    })
+
+    if (!res.ok) {
+      console.warn(`[ML API] HTTP ${res.status} — skipping ML signal`)
+      return { verdict: null, confidence: null }
+    }
+
+    const data = await res.json()
+
+    if (!data.verdict || !["REAL", "FAKE"].includes(data.verdict)) {
+      console.warn("[ML API] Invalid response format:", data)
+      return { verdict: null, confidence: null }
+    }
+
+    console.log(`[ML API] Prediction: ${data.verdict} (${data.confidence ?? "n/a"}%)`)
+    return {
+      verdict: data.verdict as "REAL" | "FAKE",
+      confidence: data.confidence ?? null,
+    }
+  } catch (err) {
+    console.warn("[ML API] Server unreachable — skipping ML signal:", err)
+    return { verdict: null, confidence: null }
+  }
 }
 
 // ── Chat completion helper — works for both Groq and OpenAI ───────────────
@@ -147,7 +187,9 @@ export async function extractEntitiesWithNER(
 }
 
 // ── 3. Ensemble Analysis ───────────────────────────────────────────────────
-// Priority: Groq → OpenAI → Heuristic
+// Flow: Flask ML model (parallel) + Groq/OpenAI AI analysis
+// Merge: ML = 40%, AI = 60%
+// Graceful fallback at every level — app never breaks
 export async function ensembleAnalysis(
   content: string,
   evidenceOrHfKey: string,
@@ -155,10 +197,15 @@ export async function ensembleAnalysis(
   groqApiKey?: string,
 ): Promise<EnsembleResult> {
   const isEvidence = evidenceOrHfKey.includes("\n") || evidenceOrHfKey.includes(":")
-  const evidence = isEvidence ? evidenceOrHfKey : undefined
-  const groqKey = groqApiKey  // passed from route.ts which has full .env access
+  const evidence   = isEvidence ? evidenceOrHfKey : undefined
+  const groqKey    = groqApiKey
 
-  // ── Try Groq first (free, fast — llama-3.3-70b) ─────────────────────────
+  // ── Fire ML prediction in background immediately ─────────────────────────
+  const mlPromise = getMLPrediction(content)
+
+  // ── Try Groq first (free, fast) ───────────────────────────────────────────
+  let aiResult: EnsembleResult | null = null
+
   if (groqKey) {
     const { system, user } = buildAnalysisPrompt(content, evidence)
     const response = await callChatAPI(
@@ -168,17 +215,14 @@ export async function ensembleAnalysis(
       600,
     )
     if (response) {
-      const result = parseAnalysisResponse(response, "Groq llama-3.3-70b")
-      if (result) {
-        console.log("[ClarifAI] Analysis via Groq: OK")
-        return result
-      }
+      aiResult = parseAnalysisResponse(response, "Groq llama-3.3-70b")
+      if (aiResult) console.log("[ClarifAI] AI analysis via Groq: OK")
     }
-    console.warn("[Groq] Failed or returned invalid response, trying OpenAI...")
+    if (!aiResult) console.warn("[Groq] Failed or invalid response, trying OpenAI...")
   }
 
-  // ── Try OpenAI as fallback ───────────────────────────────────────────────
-  if (openaiApiKey) {
+  // ── Fallback to OpenAI ────────────────────────────────────────────────────
+  if (!aiResult && openaiApiKey) {
     const { system, user } = buildAnalysisPrompt(content, evidence)
     const response = await callChatAPI(
       user, system, openaiApiKey,
@@ -187,49 +231,117 @@ export async function ensembleAnalysis(
       600,
     )
     if (response) {
-      const result = parseAnalysisResponse(response, "OpenAI GPT-4o mini")
-      if (result) {
-        console.log("[ClarifAI] Analysis via OpenAI: OK")
-        return result
-      }
+      aiResult = parseAnalysisResponse(response, "OpenAI GPT-4o mini")
+      if (aiResult) console.log("[ClarifAI] AI analysis via OpenAI: OK")
     }
-    console.warn("[OpenAI] Failed or returned invalid response, using heuristic fallback...")
+    if (!aiResult) console.warn("[OpenAI] Failed or invalid response...")
   }
 
-  // ── Last resort: heuristic ───────────────────────────────────────────────
-  console.warn("[ClarifAI] All AI providers unavailable — using heuristic fallback")
+  // ── Await ML result (was running in parallel) ─────────────────────────────
+  const mlResult    = await mlPromise
+  const mlAvailable = mlResult.verdict !== null
+
+  // ── Case 1: Both ML + AI available → merge ────────────────────────────────
+  if (mlAvailable && aiResult) {
+    const mlScore = mlResult.verdict === "REAL" ? 1 : 0
+    const aiScore = aiResult.primary_verdict === "REAL" ? 1
+                  : aiResult.primary_verdict === "FAKE" ? 0
+                  : 0.5
+
+    // ML = 40% weight, AI = 60% weight
+    const combined = mlScore * 0.4 + aiScore * 0.6
+
+    const mergedVerdict: "REAL" | "FAKE" | "UNVERIFIED" =
+      combined >= 0.65 ? "REAL"
+      : combined <= 0.35 ? "FAKE"
+      : "UNVERIFIED"
+
+    const mlConf     = mlResult.confidence ?? 50
+    const mergedConf = Math.round(mlConf * 0.4 + aiResult.confidence_score * 0.6)
+
+    console.log(
+      `[Ensemble] ML: ${mlResult.verdict} (${mlConf}%) + ` +
+      `AI: ${aiResult.primary_verdict} (${aiResult.confidence_score}%) → ` +
+      `${mergedVerdict} (${mergedConf}%)`
+    )
+
+    return {
+      ...aiResult,
+      primary_verdict: mergedVerdict,
+      confidence_score: mergedConf,
+      reasoning: `ML+AI Ensemble: ${aiResult.ml_signals?.verdict_explanation ?? aiResult.reasoning}`,
+      ml_signals: {
+        ...(aiResult.ml_signals ?? {
+          verdict_explanation: "",
+          credibility_indicators: [],
+          red_flags: [],
+          sentiment: "neutral",
+          writing_quality: "average",
+        }),
+        verdict_explanation:
+          `ML model: ${mlResult.verdict} (${mlConf}% confidence). ` +
+          (aiResult.ml_signals?.verdict_explanation ?? ""),
+      },
+    }
+  }
+
+  // ── Case 2: ML only (AI providers unavailable) ────────────────────────────
+  if (mlAvailable) {
+    console.log("[ClarifAI] ML only — AI providers unavailable")
+    return {
+      primary_verdict: mlResult.verdict as "REAL" | "FAKE",
+      confidence_score: mlResult.confidence ?? 65,
+      reasoning: `ML model prediction: ${mlResult.verdict}`,
+      ml_signals: {
+        verdict_explanation: `Your trained ML model classified this as ${mlResult.verdict} with ${mlResult.confidence ?? "unknown"}% confidence.`,
+        credibility_indicators: mlResult.verdict === "REAL" ? ["ML model classified as real news"] : [],
+        red_flags: mlResult.verdict === "FAKE" ? ["ML model detected fake news patterns"] : [],
+        sentiment: "neutral",
+        writing_quality: "average",
+      },
+    }
+  }
+
+  // ── Case 3: AI only (ML server down) ─────────────────────────────────────
+  if (aiResult) {
+    console.log("[ClarifAI] AI only — ML server unavailable")
+    return aiResult
+  }
+
+  // ── Case 4: All providers failed → heuristic ─────────────────────────────
+  console.warn("[ClarifAI] All providers unavailable — using heuristic fallback")
   return heuristicEnsemble(content)
 }
 
 // ── Heuristic fallback ─────────────────────────────────────────────────────
 function heuristicEnsemble(content: string): EnsembleResult {
-  const emotional = analyzeEmotionalContent(content)
+  const emotional   = analyzeEmotionalContent(content)
   const credibility = analyzeCredibilitySignals(content)
 
   let verdict: "REAL" | "FAKE" | "UNVERIFIED" = "UNVERIFIED"
   let confidence = 50
 
   if (credibility > 0.68 && emotional < 0.35) {
-    verdict = "REAL"
+    verdict    = "REAL"
     confidence = Math.round(55 + credibility * 28)
   } else if (credibility < 0.32 && emotional > 0.55) {
-    verdict = "FAKE"
+    verdict    = "FAKE"
     confidence = Math.round(55 + (1 - credibility) * 22)
   } else {
-    verdict = "UNVERIFIED"
+    verdict    = "UNVERIFIED"
     confidence = Math.round(40 + credibility * 20)
   }
 
   return {
     primary_verdict: verdict,
     confidence_score: Math.min(confidence, 75),
-    reasoning: `Heuristic analysis (AI providers unavailable). Credibility signals: ${(credibility * 100).toFixed(0)}%, Emotion: ${(emotional * 100).toFixed(0)}%`,
+    reasoning: `Heuristic analysis (AI providers unavailable). Credibility: ${(credibility * 100).toFixed(0)}%, Emotion: ${(emotional * 100).toFixed(0)}%`,
     ml_signals: null,
   }
 }
 
 function heuristicSentiment(content: string): SentimentResult {
-  const lower = content.toLowerCase()
+  const lower    = content.toLowerCase()
   const negWords = ["shocking","outrageous","unbelievable","scandal","exposed","evil","corrupt","fraud","disaster","terrible","horrific","devastating"]
   const posWords = ["success","achievement","breakthrough","improvement","progress","relief","victory","hope"]
   let neg = 0, pos = 0
@@ -244,9 +356,9 @@ function heuristicSentiment(content: string): SentimentResult {
 }
 
 function heuristicNER(content: string): Array<{ word: string; entity_group: string; score: number }> {
-  const words = content.split(/\s+/)
+  const words    = content.split(/\s+/)
   const entities: Array<{ word: string; entity_group: string; score: number }> = []
-  const seen = new Set<string>()
+  const seen     = new Set<string>()
   for (let i = 0; i < words.length - 1; i++) {
     const pair = `${words[i]} ${words[i + 1]}`
     if (/^[A-Z][a-z]{1,}\s+[A-Z][a-z]{1,}/.test(pair) && !seen.has(pair)) {
@@ -259,25 +371,25 @@ function heuristicNER(content: string): Array<{ word: string; entity_group: stri
 
 function analyzeEmotionalContent(text: string): number {
   const extreme = ["shocking","outrageous","unbelievable","evil","scandal","bombshell","exposed","conspiracy","hoax"]
-  const high = ["amazing","terrible","urgent","horrific","disaster","tragic","devastating","stunning","alarming"]
-  const lower = text.toLowerCase()
-  let score = 0
+  const high    = ["amazing","terrible","urgent","horrific","disaster","tragic","devastating","stunning","alarming"]
+  const lower   = text.toLowerCase()
+  let score     = 0
   for (const w of extreme) score += (lower.match(new RegExp(`\\b${w}\\b`, "g")) || []).length * 0.15
-  for (const w of high) score += (lower.match(new RegExp(`\\b${w}\\b`, "g")) || []).length * 0.08
+  for (const w of high)    score += (lower.match(new RegExp(`\\b${w}\\b`, "g")) || []).length * 0.08
   return Math.min(score, 1)
 }
 
 function analyzeCredibilitySignals(text: string): number {
-  let score = 0.5
-  const citations = [/according to/i, /research (shows|indicates)/i, /study found/i, /experts? (say|warn)/i, /reported by/i, /\[\d+\]/]
-  score += citations.filter((p) => p.test(text)).length * 0.07
-  const numbers = (text.match(/\b\d+(\.\d+)?%?\b/g) || []).length
-  score += Math.min(numbers / 10, 0.1)
+  let score           = 0.5
+  const citations     = [/according to/i, /research (shows|indicates)/i, /study found/i, /experts? (say|warn)/i, /reported by/i, /\[\d+\]/]
+  score              += citations.filter((p) => p.test(text)).length * 0.07
+  const numbers       = (text.match(/\b\d+(\.\d+)?%?\b/g) || []).length
+  score              += Math.min(numbers / 10, 0.1)
   const namedEntities = (text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/g) || []).length
-  score += Math.min(namedEntities / 20, 0.08)
-  const vague = [/they say/i, /sources claim/i, /people are saying/i, /everyone knows/i]
-  score -= vague.filter((p) => p.test(text)).length * 0.08
-  const clickbait = [/you won't believe/i, /shocking truth/i, /they don't want you to know/i]
-  score -= clickbait.filter((p) => p.test(text)).length * 0.1
+  score              += Math.min(namedEntities / 20, 0.08)
+  const vague         = [/they say/i, /sources claim/i, /people are saying/i, /everyone knows/i]
+  score              -= vague.filter((p) => p.test(text)).length * 0.08
+  const clickbait     = [/you won't believe/i, /shocking truth/i, /they don't want you to know/i]
+  score              -= clickbait.filter((p) => p.test(text)).length * 0.1
   return Math.max(0, Math.min(score, 1))
 }
