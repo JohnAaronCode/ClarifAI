@@ -36,12 +36,11 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
   const [filteredHistory, setFilteredHistory] = useState<HistoryItem[]>([])
 
   const handleVerdictClick = (verdict: "REAL" | "FAKE" | "UNVERIFIED") => {
-    setActiveFilter(activeFilter === verdict ? null : verdict)
-
-    if (activeFilter !== verdict) {
+    const next = activeFilter === verdict ? null : verdict
+    setActiveFilter(next)
+    if (next) {
       const history = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
-      const filtered = history.filter((item: HistoryItem) => item.verdict === verdict)
-      setFilteredHistory(filtered)
+      setFilteredHistory(history.filter((item: HistoryItem) => item.verdict === verdict))
     }
   }
 
@@ -80,20 +79,18 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto pr-4 space-y-6">
-          {/* Overall Summary */}
-          <div className="p-6 bg-muted/50 rounded-lg sticky top-0 z-10">
-            <div className="grid grid-cols-2 gap-8 text-center">
-              <div>
-                <div className="text-5xl font-bold text-foreground mb-2">{stats.total}</div>
-                <div className="text-sm text-muted-foreground">Total Assessments</div>
+
+          {/* Average Credibility Score — kept, useful summary */}
+          <div className="p-6 bg-muted/50 rounded-lg">
+            <div className="text-center">
+              <div className="text-5xl font-bold text-blue-600 dark:text-blue-400 mb-2">
+                {stats.avgConfidence}%
               </div>
-              <div>
-                <div className="text-5xl font-bold text-blue-600 dark:text-blue-400 mb-2">{stats.avgConfidence}%</div>
-                <div className="text-sm text-muted-foreground">Average Credibility Score</div>
-              </div>
+              <div className="text-sm text-muted-foreground">Average Credibility Score</div>
             </div>
           </div>
 
+          {/* Verdict breakdown — clickable */}
           <div className="space-y-4">
             <h4 className="font-semibold text-foreground text-base">Click to view assessments by credibility:</h4>
             <div className="grid grid-cols-3 gap-4">
@@ -107,9 +104,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
                       : `bg-muted/30 border-border hover:border-foreground/30`
                   }`}
                 >
-                  <div
-                    className={`text-3xl font-bold ${activeFilter === item.verdict ? item.textColor : "text-foreground"}`}
-                  >
+                  <div className={`text-3xl font-bold ${activeFilter === item.verdict ? item.textColor : "text-foreground"}`}>
                     {item.count}
                   </div>
                   <div className="text-sm text-muted-foreground mt-2 font-medium">{item.label}</div>
@@ -118,6 +113,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
             </div>
           </div>
 
+          {/* Filtered history list */}
           {activeFilter && filteredHistory.length > 0 && (
             <div className="space-y-3">
               <h4 className="font-semibold text-foreground text-base">
@@ -139,7 +135,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-base font-bold text-foreground">{item.confidence_score}%</div>
-                        <p className="text-xs text-muted-foreground mt-1">{item.explanation.substring(0, 30)}...</p>
+                        <p className="text-xs text-muted-foreground mt-1">{item.explanation.substring(0, 30)}…</p>
                       </div>
                     </div>
                   </Card>
@@ -153,6 +149,7 @@ export default function HistoryStatsModal({ isOpen, onClose, stats }: HistorySta
               <p className="text-sm text-muted-foreground">No assessments found in this credibility category</p>
             </div>
           )}
+
         </div>
       </DialogContent>
     </Dialog>

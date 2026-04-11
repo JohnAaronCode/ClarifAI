@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { ThemeProvider } from "@/components/theme-provider"
+import { LoadingProvider } from "@/components/loading-provider"
 import "./global.css"
 
 const geistSans = Geist({ variable: "--font-sans", subsets: ["latin"] })
@@ -12,7 +13,8 @@ export const metadata: Metadata = {
   description: "News Credibility Analyzer",
   generator: "v0.app",
   icons: {
-    icon: "/logo.svg",
+    icon: "/favicon.png",
+    shortcut: "favicon.png",
   },
 }
 

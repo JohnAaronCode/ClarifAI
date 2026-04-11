@@ -131,3 +131,25 @@
     @apply bg-background text-foreground;
   }
 }
+
+.card-glow {
+  position: absolute;
+  inset: -60%;
+  background: radial-gradient(circle at center,
+    rgba(59,130,246,0.25),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  transform: scale(1.2);
+}
+
+.cai-feat-card:hover .card-glow {
+  opacity: 1;
+}
+
+.card-glow {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
