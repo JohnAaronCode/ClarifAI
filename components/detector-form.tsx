@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Loader2, X } from "lucide-react"
+import { Loader2, X, FileText, Link2, ScanSearch, Sparkles } from "lucide-react"
 
 interface DetectorFormProps {
   onAnalyze: (content: string, type: "text" | "url") => void
@@ -21,86 +21,48 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   const [articleError, setArticleError] = useState("")
   const [urlError, setUrlError] = useState("")
 
-  // ── Detect if input looks like a URL ──────────────────────────────────
   function looksLikeUrl(text: string): boolean {
     const trimmed = text.trim()
     return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed) || /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed)
   }
 
-  // ── Article tab validation ─────────────────────────────────────────────
   const validateArticleInput = (text: string): { isValid: boolean; error: string } => {
     const trimmed = text.trim()
-
     if (!trimmed) return { isValid: false, error: "" }
-
-    // Looks like a URL pasted in the wrong tab
-    if (looksLikeUrl(trimmed)) {
-      return {
-        isValid: false,
-        error: "This looks like a URL. Please switch to the URL tab to analyze a link.",
-      }
-    }
-
-    if (trimmed.length < 30) {
-      return { isValid: false, error: "Content is too short. Please paste a full article or at least a few sentences." }
-    }
-
+    if (looksLikeUrl(trimmed)) return { isValid: false, error: "This looks like a URL. Please switch to the URL tab." }
+    if (trimmed.length < 30) return { isValid: false, error: "Content is too short. Please paste a full article." }
     const wordCount = trimmed.split(/\s+/).filter(Boolean).length
-    if (wordCount < 5) {
-      return { isValid: false, error: "Please paste a full article or more text to analyze." }
-    }
-
+    if (wordCount < 5) return { isValid: false, error: "Please paste a full article or more text." }
     const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
     const uniqueRatio = new Set(words).size / words.length
-    if (uniqueRatio < 0.4) {
-      return { isValid: false, error: "The content seems too repetitive. Please provide a real article with varied text." }
-    }
-
+    if (uniqueRatio < 0.4) return { isValid: false, error: "Content seems repetitive. Please provide a real article." }
     return { isValid: true, error: "" }
   }
 
-  // ── URL tab validation ─────────────────────────────────────────────────
   const validateUrlInput = (url: string): { isValid: boolean; error: string } => {
     const trimmed = url.trim()
-
     if (!trimmed) return { isValid: false, error: "" }
-
-    // Looks like plain text pasted in the wrong tab
-    if (!looksLikeUrl(trimmed)) {
-      return {
-        isValid: false,
-        error: "This looks like article text, not a URL. Please switch to the Article Content tab.",
-      }
-    }
-
+    if (!looksLikeUrl(trimmed)) return { isValid: false, error: "This looks like article text. Please switch to the Article tab." }
     try {
-      // Auto-prefix if missing scheme
       const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
       new URL(withScheme)
       return { isValid: true, error: "" }
     } catch {
-      return { isValid: false, error: "Please enter a valid URL (e.g., https://example.com/article)" }
+      return { isValid: false, error: "Please enter a valid URL (e.g. https://rappler.com/article)" }
     }
   }
 
   const handleArticleSubmit = () => {
     const validation = validateArticleInput(articleText)
-    if (!validation.isValid) {
-      setArticleError(validation.error)
-      return
-    }
+    if (!validation.isValid) { setArticleError(validation.error); return }
     setArticleError("")
     onAnalyze(articleText, "text")
   }
 
   const handleUrlSubmit = () => {
     const validation = validateUrlInput(urlInput)
-    if (!validation.isValid) {
-      setUrlError(validation.error)
-      return
-    }
+    if (!validation.isValid) { setUrlError(validation.error); return }
     setUrlError("")
-    // Normalize URL before sending
     const trimmed = urlInput.trim()
     const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
     onAnalyze(normalized, "url")
@@ -120,111 +82,238 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
     if (e.target.value.trim() === "") onClearResult()
   }
 
-  const handleClearArticle = () => {
-    setArticleText("")
-    setArticleError("")
-    onClearResult()
-  }
-
-  const handleClearUrl = () => {
-    setUrlInput("")
-    setUrlError("")
-    onClearResult()
-  }
+  const handleClearArticle = () => { setArticleText(""); setArticleError(""); onClearResult() }
+  const handleClearUrl = () => { setUrlInput(""); setUrlError(""); onClearResult() }
 
   return (
-    <div className="w-full">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-4">
-          <TabsTrigger value="article">Article Content</TabsTrigger>
-          <TabsTrigger value="url">URL</TabsTrigger>
-        </TabsList>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap');
+        .detector-form { font-family: 'DM Sans', sans-serif; }
 
-        {/* ARTICLE TAB */}
-        <TabsContent value="article" className="space-y-4">
-          <div className="relative">
-            <Textarea
-              placeholder="Paste the article content here to assess credibility"
-              value={articleText}
-              onChange={handleArticleChange}
-              className={`min-h-32 pr-10 ${articleError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
-            />
-            {articleText && (
-              <button
-                onClick={handleClearArticle}
-                className="absolute top-2 right-2 text-muted-foreground hover:text-foreground transition"
-                aria-label="Clear article"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+        .form-section-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.07em;
+          text-transform: uppercase;
+          margin-bottom: 10px;
+        }
 
-          {articleError && (
-            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-600 dark:text-red-400">{articleError}</p>
+        .analyze-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px 20px;
+          border-radius: 12px;
+          font-size: 14px;
+          font-weight: 600;
+          border: none;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          font-family: 'DM Sans', sans-serif;
+          letter-spacing: 0.01em;
+        }
+        .analyze-btn:not(:disabled) {
+          background: linear-gradient(135deg, #0d9488, #0f766e);
+          color: white;
+          box-shadow: 0 2px 12px rgba(13,148,136,0.25);
+        }
+        .analyze-btn:not(:disabled):hover {
+          box-shadow: 0 4px 20px rgba(13,148,136,0.4);
+          transform: translateY(-1px);
+        }
+        .analyze-btn:not(:disabled):active {
+          transform: translateY(0);
+          box-shadow: 0 1px 6px rgba(13,148,136,0.2);
+        }
+        .analyze-btn:disabled {
+          background: #e2e8f0;
+          color: #94a3b8;
+          cursor: not-allowed;
+        }
+        .dark .analyze-btn:disabled {
+          background: #1e293b;
+          color: #475569;
+        }
+
+        .form-textarea, .form-input {
+          width: 100%;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 12px 14px;
+          font-size: 14px;
+          color: #0f172a;
+          font-family: 'DM Sans', sans-serif;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          resize: vertical;
+          line-height: 1.6;
+        }
+        .dark .form-textarea, .dark .form-input {
+          background: #0f1117;
+          border-color: rgba(255,255,255,0.08);
+          color: #e2e8f0;
+        }
+        .form-textarea:focus, .form-input:focus {
+          outline: none;
+          border-color: #0d9488;
+          box-shadow: 0 0 0 3px rgba(13,148,136,0.1);
+        }
+        .form-textarea.error, .form-input.error {
+          border-color: #f87171;
+        }
+        .form-textarea::placeholder, .form-input::placeholder {
+          color: #94a3b8;
+        }
+        .dark .form-textarea::placeholder, .dark .form-input::placeholder {
+          color: #475569;
+        }
+
+        .error-msg {
+          display: flex;
+          align-items: flex-start;
+          gap: 7px;
+          padding: 10px 12px;
+          border-radius: 10px;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          font-size: 12.5px;
+          color: #dc2626;
+        }
+        .dark .error-msg {
+          background: rgba(239,68,68,0.08);
+          border-color: rgba(239,68,68,0.2);
+          color: #f87171;
+        }
+      `}</style>
+
+      <div className="detector-form w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-5 bg-slate-100 dark:bg-[#111] border border-slate-200 dark:border-white/[0.06] p-1 rounded-xl h-auto">
+            <TabsTrigger
+              value="article"
+              className="flex items-center justify-center gap-2 py-2.5 text-sm font-medium rounded-lg data-[state=active]:bg-white dark:data-[state=active]:bg-[#1e1e22] data-[state=active]:text-slate-900 dark:data-[state=active]:text-white data-[state=active]:shadow-sm text-slate-500 dark:text-slate-400 transition-all"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Text
+            </TabsTrigger>
+            <TabsTrigger
+              value="url"
+              className="flex items-center justify-center gap-2 py-2.5 text-sm font-medium rounded-lg data-[state=active]:bg-white dark:data-[state=active]:bg-[#1e1e22] data-[state=active]:text-slate-900 dark:data-[state=active]:text-white data-[state=active]:shadow-sm text-slate-500 dark:text-slate-400 transition-all"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              URL
+            </TabsTrigger>
+          </TabsList>
+
+          {/* ARTICLE TAB */}
+          <TabsContent value="article" className="space-y-3">
+            <div className="form-section-label text-slate-400 dark:text-slate-500">
+              <FileText style={{ width: 12, height: 12 }} />
+              Paste article text
             </div>
-          )}
-
-          <Button
-            onClick={handleArticleSubmit}
-            disabled={loading || !articleText.trim()}
-            className="w-full bg-blue-600 hover:bg-blue-700"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Assessing Credibility...
-              </>
-            ) : (
-              "Analyze Credibility"
-            )}
-          </Button>
-        </TabsContent>
-
-        {/* URL TAB */}
-        <TabsContent value="url" className="space-y-4">
-          <div className="relative">
-            <Input
-              type="url"
-              placeholder="Enter an article URL (e.g., https://rappler.com/article)"
-              value={urlInput}
-              onChange={handleUrlChange}
-              className={`pr-10 ${urlError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
-            />
-            {urlInput && (
-              <button
-                onClick={handleClearUrl}
-                className="absolute top-2 right-2 text-muted-foreground hover:text-foreground transition"
-                aria-label="Clear URL"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {urlError && (
-            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-600 dark:text-red-400">{urlError}</p>
+            <div className="relative">
+              <textarea
+                className={`form-textarea min-h-[120px] pr-10 ${articleError ? "error" : ""}`}
+                placeholder="Paste the full article content here to assess credibility..."
+                value={articleText}
+                onChange={handleArticleChange}
+                rows={5}
+              />
+              {articleText && (
+                <button
+                  onClick={handleClearArticle}
+                  className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
+                  aria-label="Clear"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
-          )}
 
-          <Button
-            onClick={handleUrlSubmit}
-            disabled={loading || !urlInput.trim()}
-            className="w-full bg-blue-600 hover:bg-blue-700"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Assessing Credibility...
-              </>
-            ) : (
-              "Analyze Credibility"
+            {articleError && (
+              <div className="error-msg">
+                <X style={{ width: 13, height: 13, marginTop: 1, flexShrink: 0 }} />
+                {articleError}
+              </div>
             )}
-          </Button>
-        </TabsContent>
-      </Tabs>
-    </div>
+
+            <button
+              className="analyze-btn"
+              onClick={handleArticleSubmit}
+              disabled={loading || !articleText.trim()}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="w-4 h-4" />
+                  Analyze
+                </>
+              )}
+            </button>
+          </TabsContent>
+
+          {/* URL TAB */}
+          <TabsContent value="url" className="space-y-3">
+            <div className="form-section-label text-slate-400 dark:text-slate-500">
+              <Link2 style={{ width: 12, height: 12 }} />
+              Enter article URL
+            </div>
+            <div className="relative">
+              <input
+                type="url"
+                className={`form-input pr-10 ${urlError ? "error" : ""}`}
+                placeholder="https://rappler.com/article/..."
+                value={urlInput}
+                onChange={handleUrlChange}
+              />
+              {urlInput && (
+                <button
+                  onClick={handleClearUrl}
+                  className="absolute top-1/2 -translate-y-1/2 right-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition"
+                  aria-label="Clear"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {urlError && (
+              <div className="error-msg">
+                <X style={{ width: 13, height: 13, marginTop: 1, flexShrink: 0 }} />
+                {urlError}
+              </div>
+            )}
+
+            <button
+              className="analyze-btn"
+              onClick={handleUrlSubmit}
+              disabled={loading || !urlInput.trim()}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <ScanSearch className="w-4 h-4" />
+                  Analyze
+                </>
+              )}
+            </button>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </>
   )
 }

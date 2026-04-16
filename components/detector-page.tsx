@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
 import Navbar from "@/components/navbar"
@@ -10,7 +10,8 @@ import Footer from "@/components/footer"
 import {
   ShieldCheck, ShieldAlert, ShieldQuestion, Trash2, CheckSquare, Square,
   BarChart2, Clock, FileText, Link2, ChevronRight, X, Search,
-  Filter, AlertTriangle, CheckCircle2, Info,
+  Filter, AlertTriangle, CheckCircle2, Info, Users, TrendingUp,
+  Activity, ScanSearch, History,
 } from "lucide-react"
 
 interface AnalysisResult {
@@ -37,6 +38,13 @@ interface HistoryItem {
   created_at: string
 }
 
+interface VisitorData {
+  total_visitors: number
+  total_analyses: number
+  today: number
+  today_date: string
+}
+
 const VERDICT_DISPLAY = {
   REAL:       { label: "Credible",     bg: "bg-emerald-100 dark:bg-emerald-900/40", text: "text-emerald-700 dark:text-emerald-400", border: "border-emerald-200 dark:border-emerald-700", icon: ShieldCheck,    dot: "bg-emerald-500" },
   FAKE:       { label: "Likely False", bg: "bg-rose-100 dark:bg-rose-900/40",       text: "text-rose-700 dark:text-rose-400",       border: "border-rose-200 dark:border-rose-700",       icon: ShieldAlert,    dot: "bg-rose-500"    },
@@ -47,14 +55,92 @@ function makeContentKey(content: string): string {
   return content.trim().toLowerCase().replace(/\s+/g, " ").substring(0, 300)
 }
 
+function useVisitorCount() {
+  const [data, setData] = useState<VisitorData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const hasCounted = useRef(false)
+
+  useEffect(() => {
+    if (hasCounted.current) return
+    hasCounted.current = true
+    const run = async () => {
+      try {
+        const alreadyCounted = sessionStorage.getItem("clarifai_counted")
+        const res = alreadyCounted
+          ? await fetch("/api/visitors")
+          : await fetch("/api/visitors", { method: "POST" })
+        if (!alreadyCounted) sessionStorage.setItem("clarifai_counted", "1")
+        if (res.ok) setData(await res.json())
+      } catch {}
+      finally { setLoading(false) }
+    }
+    run()
+  }, [])
+
+  return { data, loading }
+}
+
+function AnimatedCounter({ value, loading }: { value: number | undefined; loading: boolean }) {
+  const [displayed, setDisplayed] = useState(0)
+  const frameRef = useRef<number>(0)
+
+  useEffect(() => {
+    if (loading || value === undefined) return
+    const start = displayed
+    const end = value
+    const duration = 1200
+    const startTime = performance.now()
+    const animate = (now: number) => {
+      const elapsed = now - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplayed(Math.round(start + (end - start) * eased))
+      if (progress < 1) frameRef.current = requestAnimationFrame(animate)
+    }
+    frameRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frameRef.current)
+  }, [value, loading])
+
+  if (loading) return <span className="inline-block w-8 h-5 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
+  return <span>{displayed.toLocaleString()}</span>
+}
+
+const STAT_CONFIG = [
+  {
+    key: "total_visitors" as keyof VisitorData,
+    label: "Total Visitors",
+    icon: Users,
+    color: "text-teal-600 dark:text-teal-400",
+    iconBg: "bg-teal-50 dark:bg-teal-900/30",
+    border: "border-teal-100 dark:border-teal-900/40",
+  },
+  {
+    key: "today" as keyof VisitorData,
+    label: "Today's Visitors",
+    icon: TrendingUp,
+    color: "text-sky-600 dark:text-sky-400",
+    iconBg: "bg-sky-50 dark:bg-sky-900/30",
+    border: "border-sky-100 dark:border-sky-900/40",
+  },
+  {
+    key: "total_analyses" as keyof VisitorData,
+    label: "Analyses Done",
+    icon: Activity,
+    color: "text-violet-600 dark:text-violet-400",
+    iconBg: "bg-violet-50 dark:bg-violet-900/30",
+    border: "border-violet-100 dark:border-violet-900/40",
+  },
+]
+
 export default function DetectorPage() {
   const [activeTab, setActiveTab] = useState("detector")
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [inputContent, setInputContent] = useState("")
+  const { data: visitorData, loading: visitorLoading } = useVisitorCount()
 
   useEffect(() => {
-    document.title = "ClarifAI — Detector"
+    document.title = "ClarifAI — News Credibility Analyzer"
   }, [])
 
   const handleAnalyze = async (content: string, type: "text" | "url") => {
@@ -68,17 +154,8 @@ export default function DetectorPage() {
       })
       const data = await response.json()
       setResult(data)
-
       if (data.verdict !== "ERROR") {
-        // Increment global analysis counter — awaited so it actually runs
-        try {
-          const patchRes = await fetch("/api/visitors", { method: "PATCH" })
-          if (!patchRes.ok) console.warn("[ClarifAI] PATCH /api/visitors failed:", patchRes.status)
-        } catch (e) {
-          console.warn("[ClarifAI] PATCH /api/visitors error:", e)
-        }
-
-        // Save to local history (deduplicated by content)
+        try { await fetch("/api/visitors", { method: "PATCH" }) } catch {}
         const history: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
         const contentKey = makeContentKey(content)
         const deduplicated = history.filter(item => makeContentKey(item.content_preview) !== contentKey)
@@ -98,7 +175,7 @@ export default function DetectorPage() {
         deduplicated.unshift(newEntry)
         localStorage.setItem("analysisHistory", JSON.stringify(deduplicated.slice(0, 50)))
       }
-    } catch (error) {
+    } catch {
       setResult({ verdict: "ERROR", confidence_score: 0, explanation: "Error during analysis. Please try again." })
     } finally {
       setLoading(false)
@@ -108,137 +185,182 @@ export default function DetectorPage() {
   return (
     <>
       <style>{`
-        :root { color-scheme: light dark; }
-        .dark .detector-page-bg { background: #111111 !important; }
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Serif+Display:ital@0;1&display=swap');
 
-        .cai-history-card { transition: all 0.25s cubic-bezier(0.4,0,0.2,1) !important; }
-        .cai-history-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.18); }
-
-        /* ... existing styles mo ... */
-
-        /* FLOATING BUBBLES */
-        @keyframes floatBubble {
-          0% {
-            transform: translateY(0) scale(1);
-            opacity: 0.5;
-          }
-          50% {
-            transform: translateY(-120px) scale(1.1);
-            opacity: 0.8;
-          }
-          100% {
-            transform: translateY(-240px) scale(1);
-            opacity: 0;
-          }
+        .clarifai-root {
+          font-family: 'DM Sans', sans-serif;
         }
 
-        .bubble {
-          position: absolute;
-          bottom: -60px;
+        .hero-wordmark {
+          font-family: 'DM Serif Display', serif;
+          font-style: normal;
+          letter-spacing: -0.02em;
+        }
+
+        .hero-gradient-dark {
+          background: linear-gradient(135deg, #e2e8f0 0%, #94d4c8 40%, #e2e8f0 80%);
+          background-size: 300% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: gradient-sweep 8s ease-in-out infinite alternate;
+        }
+        .hero-gradient-light {
+          background: linear-gradient(135deg, #0f172a 0%, #0d7a68 40%, #0f172a 80%);
+          background-size: 300% auto;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          animation: gradient-sweep 8s ease-in-out infinite alternate;
+        }
+        @keyframes gradient-sweep {
+          0%   { background-position: 0% 50% }
+          100% { background-position: 100% 50% }
+        }
+
+        .stat-card {
+          position: relative;
+          overflow: hidden;
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .stat-card:hover {
+          transform: translateY(-3px);
+        }
+
+        .live-dot {
+          width: 6px; height: 6px;
           border-radius: 50%;
-          background: rgba(59, 130, 246, 0.15);
-          animation: floatBubble linear infinite;
+          background: #14b8a6;
+          display: inline-block;
+          animation: live-pulse 2.5s ease-in-out infinite;
+        }
+        @keyframes live-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(0.7); }
+        }
+
+        .tab-pill {
+          transition: all 0.2s ease;
+        }
+
+        .history-item {
+          transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+        }
+        .history-item:hover {
+          transform: translateY(-1px);
+        }
+
+        .scan-icon {
+          animation: scan-pulse 3s ease-in-out infinite;
+        }
+        @keyframes scan-pulse {
+          0%, 100% { opacity: 0.7; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.05); }
+        }
+
+        .fade-in {
+          animation: fade-up 0.4s ease both;
+        }
+        @keyframes fade-up {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
 
-      <div
-        className="detector-page-bg min-h-screen bg-slate-50 dark:bg-[#111111] flex flex-col"
-        style={{ transition: "background 0.3s", position: "relative", overflow: "hidden" }}
-      >
-        {/* ── Rich animated background ── */}
-        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
+      <div className="clarifai-root min-h-screen bg-slate-50 dark:bg-[#0e0e0f] flex flex-col">
+        <Navbar />
 
-        {/* Floating bubbles background */}
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          overflow: "hidden",
-          zIndex: 0,
-          pointerEvents: "none"
-        }}>
-          <div className="bubble b1" />
-          <div className="bubble b2" />
-          <div className="bubble b3" />
-        </div>
+        <main className="max-w-3xl mx-auto px-4 py-10 flex-1 w-full">
 
-          {/* Orbs */}
-          <div style={{
-            position:"absolute",
-            top:"-10%",
-            left:"-5%",
-            width:520,
-            height:520,
-            borderRadius:"50%",
-            background:"radial-gradient(circle, rgba(37,99,235,0.18) 0%, transparent 68%)",
-            filter:"blur(1px)"
-          }} />
+          {/* ── Hero ──────────────────────────────────────────────────── */}
+          <div className="text-center mb-10 fade-in">
 
-          <div style={{
-            position:"absolute",
-            top:"-6%",
-            right:"-8%",
-            width:440,
-            height:440,
-            borderRadius:"50%",
-            background:"radial-gradient(circle, rgba(6,182,212,0.13) 0%, transparent 68%)",
-            filter:"blur(1px)"
-          }} />
+            {/* Wordmark */}
+            <h1
+              className={`hero-wordmark block mb-3 dark:hero-gradient-dark hero-gradient-light`}
+              style={{ fontSize: "clamp(42px, 8vw, 72px)", lineHeight: 1.05 }}
+            >
+              <span className="dark:hidden hero-gradient-light">ClarifAI</span>
+              <span className="hidden dark:inline hero-gradient-dark">ClarifAI</span>
+            </h1>
 
-          <div style={{
-            position:"absolute",
-            bottom:"5%",
-            left:"28%",
-            width:380,
-            height:380,
-            borderRadius:"50%",
-            background:"radial-gradient(circle, rgba(59,130,246,0.1) 0%, transparent 68%)",
-            filter:"blur(1px)"
-          }} />
-        </div>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400 tracking-widest uppercase mb-2">
+              News Credibility Analyzer
+            </p>
+            <p className="text-sm text-slate-400 dark:text-slate-500 max-w-sm mx-auto leading-relaxed">
+              Don't guess the news — ClarifAI it.
+            </p>
 
-        <div style={{ position:"relative", zIndex:1, display:"flex", flexDirection:"column", minHeight:"100vh" }}>
-          <Navbar />
-
-          <main className="max-w-4xl mx-auto px-4 py-8 flex-1 w-full">
-            <div className="mb-8">
-              <h1 className="text-4xl font-bold mb-2 text-center text-slate-900 dark:text-white tracking-tight">ClarifAI</h1>
-              <p className="text-center text-slate-500 dark:text-[#6b6b6b] text-sm">News Credibility Analyzer</p>
+            {/* Stats row */}
+            <div className="flex justify-center gap-3 flex-wrap mt-8">
+              {STAT_CONFIG.map(cfg => {
+                const Icon = cfg.icon
+                return (
+                  <div
+                    key={cfg.key}
+                    className={`stat-card flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-white dark:bg-[#17171a] border ${cfg.border} shadow-sm`}
+                  >
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${cfg.iconBg}`}>
+                      <Icon className={`w-4 h-4 ${cfg.color}`} />
+                    </div>
+                    <div className="text-left">
+                      <div className={`text-xl font-semibold leading-tight ${cfg.color}`}>
+                        <AnimatedCounter
+                          value={visitorData?.[cfg.key] as number | undefined}
+                          loading={visitorLoading}
+                        />
+                      </div>
+                      <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 whitespace-nowrap">{cfg.label}</div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
+          </div>
 
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6 bg-slate-200 dark:bg-[#1a1a1a]">
-                <TabsTrigger value="detector" className="data-[state=active]:bg-white dark:data-[state=active]:bg-[#222222] data-[state=active]:text-slate-900 dark:data-[state=active]:text-white text-slate-600 dark:text-[#6b6b6b] transition-all duration-200">
-                  Content Credibility Analysis
-                </TabsTrigger>
-                <TabsTrigger value="history" className="data-[state=active]:bg-white dark:data-[state=active]:bg-[#222222] data-[state=active]:text-slate-900 dark:data-[state=active]:text-white text-slate-600 dark:text-[#6b6b6b] transition-all duration-200">
-                  Analysis History
-                </TabsTrigger>
-              </TabsList>
+          {/* ── Main Tabs ─────────────────────────────────────────────── */}
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full fade-in" style={{ animationDelay: "0.1s" }}>
+            <TabsList className="grid w-full grid-cols-2 mb-6 bg-white dark:bg-[#17171a] border border-slate-200 dark:border-white/[0.06] p-1 rounded-2xl h-auto shadow-sm">
+              <TabsTrigger
+                value="detector"
+                className="tab-pill flex items-center justify-center gap-2 data-[state=active]:bg-slate-900 dark:data-[state=active]:bg-white data-[state=active]:text-white dark:data-[state=active]:text-slate-900 data-[state=active]:shadow-sm text-slate-500 dark:text-slate-400 font-medium py-2.5 text-sm rounded-xl"
+              >
+                <ScanSearch className="w-4 h-4" />
+                Analyze
+              </TabsTrigger>
+              <TabsTrigger
+                value="history"
+                className="tab-pill flex items-center justify-center gap-2 data-[state=active]:bg-slate-900 dark:data-[state=active]:bg-white data-[state=active]:text-white dark:data-[state=active]:text-slate-900 data-[state=active]:shadow-sm text-slate-500 dark:text-slate-400 font-medium py-2.5 text-sm rounded-xl"
+              >
+                <History className="w-4 h-4" />
+                History
+              </TabsTrigger>
+            </TabsList>
 
-              <TabsContent value="detector" className="space-y-6">
-                <Card className="p-6 bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-white/8 shadow-sm cai-stat-card">
-                  <h2 className="text-2xl font-semibold mb-2 text-center text-slate-900 dark:text-white">Article Credibility Assessment</h2>
-                  <p className="text-slate-500 dark:text-[#6b6b6b] mb-6 text-center text-sm">
-                    Submit a news article or URL for credibility assessment and detailed analysis.
-                  </p>
-                  <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
-                </Card>
-                {result && <ResultsDisplay result={result} inputContent={inputContent} />}
-              </TabsContent>
+            <TabsContent value="detector" className="space-y-6">
+              <Card className="p-6 bg-white dark:bg-[#17171a] border-slate-200 dark:border-white/[0.06] shadow-sm rounded-2xl">
+                <DetectorForm onAnalyze={handleAnalyze} onClearResult={() => setResult(null)} loading={loading} />
+              </Card>
+              {result && (
+                <div className="fade-in">
+                  <ResultsDisplay result={result} inputContent={inputContent} />
+                </div>
+              )}
+            </TabsContent>
 
-              <TabsContent value="history">
-                <HistoryTab />
-              </TabsContent>
-            </Tabs>
-          </main>
+            <TabsContent value="history">
+              <HistoryTab />
+            </TabsContent>
+          </Tabs>
+        </main>
 
-          <Footer />
-        </div>
+        <Footer />
       </div>
     </>
   )
 }
 
+// ── History Tab ───────────────────────────────────────────────────────────
 function HistoryTab() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [filtered, setFiltered] = useState<HistoryItem[]>([])
@@ -296,51 +418,66 @@ function HistoryTab() {
   }
 
   if (loading) return (
-    <div className="flex items-center justify-center py-16">
+    <div className="flex items-center justify-center py-20">
       <div className="text-center space-y-3">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-sm text-slate-500 dark:text-[#6b6b6b]">Loading history...</p>
+        <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-sm text-slate-400 dark:text-slate-500">Loading history...</p>
       </div>
     </div>
   )
 
   if (history.length === 0) return (
-    <Card className="p-16 text-center bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-white/8">
-      <BarChart2 className="w-12 h-12 text-slate-300 dark:text-[#333] mx-auto mb-4" />
-      <p className="text-lg font-semibold text-slate-800 dark:text-white mb-1">No assessments yet</p>
-      <p className="text-sm text-slate-500 dark:text-[#6b6b6b]">Start by analyzing some content to see your history here.</p>
+    <Card className="p-16 text-center bg-white dark:bg-[#17171a] border-slate-200 dark:border-white/[0.06] rounded-2xl shadow-sm">
+      <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-4">
+        <BarChart2 className="w-7 h-7 text-slate-300 dark:text-slate-600" />
+      </div>
+      <p className="text-base font-semibold text-slate-700 dark:text-slate-300 mb-1">No assessments yet</p>
+      <p className="text-sm text-slate-400 dark:text-slate-500">Start by analyzing some content to see your history here.</p>
     </Card>
   )
 
   const allSelected = filtered.length > 0 && selectedItems.size === filtered.length
 
   return (
-    <div className="space-y-5">
-      <Card className="p-4 space-y-3 bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-white/8 shadow-sm">
+    <div className="space-y-4 fade-in">
+      <Card className="p-4 space-y-3 bg-white dark:bg-[#17171a] border-slate-200 dark:border-white/[0.06] shadow-sm rounded-2xl">
+        {/* Search */}
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#555]" />
-          <input type="text" placeholder="Search assessments..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-9 py-2 text-sm rounded-lg border border-slate-200 dark:border-white/8 bg-slate-50 dark:bg-[#222] text-slate-800 dark:text-[#e5e5e5] placeholder:text-slate-400 dark:placeholder:text-[#555] focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <input
+            type="text"
+            placeholder="Search assessments..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-9 py-2 text-sm rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 dark:bg-[#111] text-slate-800 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500/50 transition"
+          />
           {searchQuery && (
-            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-[#a0a0a0]">
+            <button onClick={() => setSearchQuery("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
+        {/* Filter pills */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Filter className="w-3.5 h-3.5 text-slate-400 dark:text-[#555] shrink-0" />
+          <Filter className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 shrink-0" />
           {(["ALL", "REAL", "FAKE", "UNVERIFIED"] as const).map(f => {
             const countKey = f.toLowerCase() as "real" | "fake" | "unverified"
             const count = f === "ALL" ? stats.total : (stats[countKey] ?? 0)
             const isActive = activeFilter === f
             const cfg = f !== "ALL" ? VERDICT_DISPLAY[f] : null
             return (
-              <button key={f} onClick={() => setActiveFilter(f)} className={`cai-filter-pill inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                isActive
-                  ? cfg ? `${cfg.bg} ${cfg.text} ${cfg.border}` : "bg-slate-800 dark:bg-white text-white dark:text-slate-900 border-slate-800 dark:border-white"
-                  : "bg-slate-100 dark:bg-[#222] text-slate-500 dark:text-[#6b6b6b] border-slate-200 dark:border-white/8 hover:border-slate-400 dark:hover:border-white/20"
-              }`}>
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                  isActive
+                    ? cfg
+                      ? `${cfg.bg} ${cfg.text} ${cfg.border}`
+                      : "bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white"
+                    : "bg-slate-100 dark:bg-[#222] text-slate-500 dark:text-slate-400 border-slate-200 dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-white/20"
+                }`}
+              >
                 {cfg && isActive && <cfg.icon className="w-3 h-3" />}
                 {f === "ALL" ? "All" : VERDICT_DISPLAY[f].label}
                 <span className={`px-1.5 py-0.5 rounded-full text-xs ${isActive ? "bg-black/10 dark:bg-white/20" : "bg-slate-200 dark:bg-[#333]"}`}>{count}</span>
@@ -349,19 +486,25 @@ function HistoryTab() {
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-200 dark:border-white/6">
-          <button onClick={toggleSelectAll} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-[#6b6b6b] hover:text-slate-700 dark:hover:text-[#a0a0a0] transition">
-            {allSelected ? <CheckSquare className="w-3.5 h-3.5 text-blue-500" /> : <Square className="w-3.5 h-3.5" />}
+        {/* Bulk actions */}
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-100 dark:border-white/[0.04]">
+          <button onClick={toggleSelectAll} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition">
+            {allSelected ? <CheckSquare className="w-3.5 h-3.5 text-teal-500" /> : <Square className="w-3.5 h-3.5" />}
             {allSelected ? "Deselect all" : "Select all"}
           </button>
           <div className="flex items-center gap-2">
-            {selectedItems.size > 0 && <span className="text-xs text-slate-500 dark:text-[#6b6b6b]">{selectedItems.size} selected</span>}
-            <button onClick={deleteSelected} disabled={selectedItems.size === 0}
-              className="cai-action-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 hover:bg-rose-200 dark:hover:bg-rose-950/60 disabled:opacity-40 disabled:cursor-not-allowed transition">
+            {selectedItems.size > 0 && <span className="text-xs text-slate-400 dark:text-slate-500">{selectedItems.size} selected</span>}
+            <button
+              onClick={deleteSelected}
+              disabled={selectedItems.size === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-950/50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
               <Trash2 className="w-3 h-3" />Delete selected
             </button>
-            <button onClick={clearAll}
-              className="cai-action-btn flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-[#222] text-slate-600 dark:text-[#a0a0a0] border border-slate-200 dark:border-white/8 hover:bg-slate-200 dark:hover:bg-[#2a2a2a] transition">
+            <button
+              onClick={clearAll}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-[#222] text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/[0.08] hover:bg-slate-200 dark:hover:bg-[#2a2a2a] transition"
+            >
               <X className="w-3 h-3" />Clear all
             </button>
           </div>
@@ -369,14 +512,14 @@ function HistoryTab() {
       </Card>
 
       {filtered.length !== history.length && (
-        <p className="text-xs text-slate-500 dark:text-[#6b6b6b] px-1">Showing {filtered.length} of {history.length} assessments</p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 px-1">Showing {filtered.length} of {history.length} assessments</p>
       )}
 
       {filtered.length === 0 ? (
-        <Card className="p-10 text-center bg-white dark:bg-[#1a1a1a] border-slate-200 dark:border-white/8">
-          <Search className="w-8 h-8 text-slate-300 dark:text-[#333] mx-auto mb-3" />
-          <p className="text-sm font-medium text-slate-700 dark:text-[#a0a0a0]">No matching assessments</p>
-          <p className="text-xs text-slate-500 dark:text-[#6b6b6b] mt-1">Try adjusting your search or filter.</p>
+        <Card className="p-10 text-center bg-white dark:bg-[#17171a] border-slate-200 dark:border-white/[0.06] rounded-2xl">
+          <Search className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-400">No matching assessments</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Try adjusting your search or filter.</p>
         </Card>
       ) : (
         <div className="space-y-2">
@@ -388,21 +531,26 @@ function HistoryTab() {
             const date = new Date(item.created_at)
 
             return (
-              <Card key={item.id} className={`cai-history-card overflow-hidden bg-white dark:bg-[#1a1a1a] shadow-sm ${
-                isSelected ? "border-blue-400 dark:border-blue-500/50" : "border-slate-200 dark:border-white/8 hover:border-slate-300 dark:hover:border-white/[0.14]"
-              }`}>
+              <Card
+                key={item.id}
+                className={`history-item overflow-hidden bg-white dark:bg-[#17171a] shadow-sm rounded-xl ${
+                  isSelected
+                    ? "border-teal-400 dark:border-teal-600/50"
+                    : "border-slate-200 dark:border-white/[0.06] hover:border-slate-300 dark:hover:border-white/[0.12]"
+                }`}
+              >
                 <div className="p-4 flex items-start gap-3">
-                  <button onClick={() => toggleSelect(item.id)} className="mt-0.5 shrink-0 text-slate-400 dark:text-[#555] hover:text-blue-500 transition">
-                    {isSelected ? <CheckSquare className="w-4 h-4 text-blue-500" /> : <Square className="w-4 h-4" />}
+                  <button onClick={() => toggleSelect(item.id)} className="mt-0.5 shrink-0 text-slate-300 dark:text-slate-600 hover:text-teal-500 transition">
+                    {isSelected ? <CheckSquare className="w-4 h-4 text-teal-500" /> : <Square className="w-4 h-4" />}
                   </button>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 dark:text-[#e5e5e5] line-clamp-2 mb-2 leading-snug">{item.content_preview}</p>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 dark:text-[#6b6b6b]">
+                    <p className="text-sm font-medium text-slate-800 dark:text-slate-200 line-clamp-2 mb-2 leading-snug">{item.content_preview}</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400 dark:text-slate-500">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
                         {date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · {date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </span>
-                      <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full font-medium uppercase tracking-wide ${item.input_type === "url" ? "bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}>
+                      <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full font-medium uppercase tracking-wide ${item.input_type === "url" ? "bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400" : "bg-sky-50 dark:bg-sky-950/30 text-sky-600 dark:text-sky-400"}`}>
                         {item.input_type === "url" ? <Link2 className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
                         {item.input_type}
                       </span>
@@ -412,58 +560,61 @@ function HistoryTab() {
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
                       <VIcon className="w-3 h-3" />{cfg.label}
                     </span>
-                    <div className="text-right">
-                      <span className="text-lg font-bold text-slate-800 dark:text-white">{item.confidence_score}%</span>
-                      <p className="text-xs text-slate-500 dark:text-[#6b6b6b]">credibility</p>
-                    </div>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 font-mono">{item.confidence_score}%</span>
                   </div>
                 </div>
 
+                {/* Confidence bar */}
                 <div className="h-0.5 w-full bg-slate-100 dark:bg-[#222]">
-                  <div className={`h-full transition-all duration-500 ${item.verdict === "REAL" ? "bg-emerald-400" : item.verdict === "FAKE" ? "bg-rose-400" : "bg-amber-400"}`}
-                    style={{ width: `${item.confidence_score}%` }} />
+                  <div
+                    className={`h-full transition-all duration-700 ${item.verdict === "REAL" ? "bg-emerald-400" : item.verdict === "FAKE" ? "bg-rose-400" : "bg-amber-400"}`}
+                    style={{ width: `${item.confidence_score}%` }}
+                  />
                 </div>
 
-                <button onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                  className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-slate-500 dark:text-[#6b6b6b] hover:text-slate-700 dark:hover:text-[#a0a0a0] hover:bg-slate-50 dark:hover:bg-[#1f1f1f] transition border-t border-slate-100 dark:border-white/5">
+                {/* Expand toggle */}
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                  className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#1f1f22] transition border-t border-slate-100 dark:border-white/[0.04]"
+                >
                   {isExpanded ? "Hide details" : "Show details"}
                   <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
                 </button>
 
                 {isExpanded && (
-                  <div className="px-4 pb-4 pt-3 border-t border-slate-100 dark:border-white/5 bg-slate-50/50 dark:bg-[#161616] space-y-3">
+                  <div className="px-4 pb-4 pt-3 border-t border-slate-100 dark:border-white/[0.04] bg-slate-50/50 dark:bg-[#13131600] space-y-3">
                     <div>
-                      <p className="text-xs font-semibold text-slate-700 dark:text-[#a0a0a0] mb-1">Assessment Summary</p>
-                      <p className="text-xs text-slate-500 dark:text-[#6b6b6b] leading-relaxed">{item.explanation}</p>
+                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Assessment Summary</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{item.explanation}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       {item.source_credibility !== undefined && (
-                        <div className="rounded-lg bg-white dark:bg-[#1a1a1a] border border-slate-200 dark:border-white/8 p-3">
-                          <p className="text-xs text-slate-500 dark:text-[#6b6b6b] mb-0.5">Source Credibility</p>
+                        <div className="rounded-xl bg-white dark:bg-[#17171a] border border-slate-200 dark:border-white/[0.06] p-3">
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Source Credibility</p>
                           <p className="text-sm font-bold text-slate-800 dark:text-white">{item.source_credibility}%</p>
                         </div>
                       )}
                       {item.sentiment_score !== undefined && (
-                        <div className="rounded-lg bg-white dark:bg-[#1a1a1a] border border-slate-200 dark:border-white/8 p-3">
-                          <p className="text-xs text-slate-500 dark:text-[#6b6b6b] mb-0.5">Sentiment Score</p>
+                        <div className="rounded-xl bg-white dark:bg-[#17171a] border border-slate-200 dark:border-white/[0.06] p-3">
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mb-0.5">Sentiment Score</p>
                           <p className="text-sm font-bold text-slate-800 dark:text-white">{Math.round(item.sentiment_score * 100)}%</p>
                         </div>
                       )}
                     </div>
                     {item.verdict === "FAKE" && (
-                      <div className="rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 p-3 flex items-start gap-2">
+                      <div className="rounded-xl bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 p-3 flex items-start gap-2">
                         <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
-                        <p className="text-xs text-rose-700 dark:text-rose-400">This content showed strong indicators of misinformation. Do not share without independent verification.</p>
+                        <p className="text-xs text-rose-700 dark:text-rose-400">Strong indicators of misinformation. Do not share without verification.</p>
                       </div>
                     )}
                     {item.verdict === "REAL" && (
-                      <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 p-3 flex items-start gap-2">
+                      <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 p-3 flex items-start gap-2">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                        <p className="text-xs text-emerald-700 dark:text-emerald-400">This content appeared credible at the time of assessment. Always verify with primary sources.</p>
+                        <p className="text-xs text-emerald-700 dark:text-emerald-400">Appeared credible at time of assessment. Always verify with primary sources.</p>
                       </div>
                     )}
                     {item.verdict === "UNVERIFIED" && (
-                      <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 flex items-start gap-2">
+                      <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3 flex items-start gap-2">
                         <Info className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
                         <p className="text-xs text-amber-700 dark:text-amber-400">Could not be fully verified. Seek confirmation from multiple trusted sources.</p>
                       </div>
