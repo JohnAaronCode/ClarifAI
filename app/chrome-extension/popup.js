@@ -1,4 +1,4 @@
-const DEFAULT_SERVER = "https://your-clarifai-app.vercel.app"
+const DEFAULT_SERVER = "https://clarif-ai-beta.vercel.app"
 let currentMode = "text"
 let serverUrl = DEFAULT_SERVER
 
@@ -42,14 +42,37 @@ function escHtml(str) {
 
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
+
+  // ── Attach all event listeners here (no inline onclick) ──────────────
+
+  // Tab switching
+  document.querySelectorAll(".tab").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab, btn))
+  })
+
+  // Mode toggle
+  document.getElementById("mode-text").addEventListener("click", () => setMode("text"))
+  document.getElementById("mode-url").addEventListener("click", () => setMode("url"))
+
+  // Analyze buttons
+  document.getElementById("analyze-page-btn").addEventListener("click", analyzeCurrentPage)
+  document.getElementById("analyze-manual-btn").addEventListener("click", analyzeManual)
+
+  // Settings save
+  document.getElementById("save-settings-btn").addEventListener("click", saveSettings)
+
+  // ── Load stored settings ──────────────────────────────────────────────
   const stored = await chrome.storage.local.get(["serverUrl", "autoDetect", "showFab"])
   if (stored.serverUrl) {
     serverUrl = stored.serverUrl
     document.getElementById("server-url-input").value = serverUrl
+  } else {
+    document.getElementById("server-url-input").value = DEFAULT_SERVER
   }
   if (stored.autoDetect === false) document.getElementById("auto-detect").checked = false
   if (stored.showFab === false) document.getElementById("show-fab").checked = false
 
+  // ── Load current tab info ─────────────────────────────────────────────
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (tab) {
     const url = tab.url || ""
@@ -59,11 +82,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? `${social}: ${tab.title || "Post"}`
       : (tab.title || "Unknown Page")
     if (!url.startsWith("http")) {
-      const btn = document.getElementById("analyze-page-btn")
-      btn.disabled = true
+      document.getElementById("analyze-page-btn").disabled = true
     }
   }
 
+  // ── Handle pending analysis from context menu ─────────────────────────
   const { pendingAnalysis } = await chrome.storage.local.get("pendingAnalysis")
   if (pendingAnalysis) {
     await chrome.storage.local.remove("pendingAnalysis")
@@ -114,7 +137,7 @@ async function analyzeCurrentPage() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
 
   if (!tab?.url?.startsWith("http")) {
-    resultEl.innerHTML = `<div class="error-box">Cannot analyze this page. Please navigate to a news article or social media post first.</div>`
+    resultEl.innerHTML = `<div class="error-box">Cannot analyze this page. Please navigate to a news article first.</div>`
     return
   }
 
@@ -250,7 +273,6 @@ function renderResult(data, originalInput, inputType) {
     `<li><span class="bullet-dot bullet-${data.verdict}"></span>${escHtml(b)}</li>`
   ).join("")
 
-  // Source links with headline-based search URLs
   const sourceLinks = (data.source_links ?? []).slice(0, 2)
   const sq = data.search_query || ""
   const sourceLinksHtml = sourceLinks.length
@@ -258,7 +280,6 @@ function renderResult(data, originalInput, inputType) {
         <div class="source-links-label">Cross-check sources</div>
         ${sourceLinks.map(src => {
           let href = src.article_url || src.url || "#"
-          // If it's not a direct article, build a headline search URL
           if (sq && src.article_url === src.homepage_url) {
             try {
               const domain = new URL(src.homepage_url || src.url).hostname.replace("www.", "")
@@ -350,14 +371,25 @@ async function loadHistory() {
           <span class="history-time">${timeStr}</span>
         </div>
         <div class="history-actions">
-          <button class="hist-btn hist-reanalyze" onclick="reanalyzeItem(${item.id})">↺ Re-analyze</button>
+          <button class="hist-btn hist-reanalyze" data-id="${item.id}" data-action="reanalyze">↺ Re-analyze</button>
           ${item.type === "url"
             ? `<a href="${escHtml(item.full_content || item.content || "#")}" target="_blank" class="hist-btn hist-open">↗ Open URL</a>`
-            : `<button class="hist-btn hist-view" onclick="viewContent(${item.id})">📄 View</button>`}
-          <button class="hist-btn hist-delete" onclick="deleteHistoryItem(${item.id})">✕</button>
+            : `<button class="hist-btn hist-view" data-id="${item.id}" data-action="view">📄 View</button>`}
+          <button class="hist-btn hist-delete" data-id="${item.id}" data-action="delete">✕</button>
         </div>
       </div>`
   }).join("")
+
+  // Attach history button listeners (no inline onclick needed)
+  el.querySelectorAll(".hist-btn[data-action]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.id)
+      const action = btn.dataset.action
+      if (action === "reanalyze") reanalyzeItem(id)
+      else if (action === "view") viewContent(id)
+      else if (action === "delete") deleteHistoryItem(id)
+    })
+  })
 }
 
 async function reanalyzeItem(id) {
@@ -384,17 +416,19 @@ function viewContent(id) {
       <div style="background:#17171a;border:1px solid rgba(255,255,255,0.08);border-radius:12px;width:100%;max-height:420px;display:flex;flex-direction:column;overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.06);">
           <span style="font-size:12px;font-weight:600;color:#e2e8f0;">📄 Analyzed Content</span>
-          <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 2px;">✕</button>
+          <button id="overlay-close" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 2px;">✕</button>
         </div>
         <div style="padding:12px 14px;overflow-y:auto;flex:1;">
           <p style="font-size:11.5px;color:#94a3b8;line-height:1.7;white-space:pre-wrap;">${escHtml(content)}</p>
         </div>
         <div style="padding:10px 14px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:flex-end;">
-          <button onclick="this.closest('[style*=fixed]').remove()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:#94a3b8;font-size:11px;padding:5px 12px;cursor:pointer;font-family:inherit;">Close</button>
+          <button id="overlay-close-btn" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:7px;color:#94a3b8;font-size:11px;padding:5px 12px;cursor:pointer;font-family:inherit;">Close</button>
         </div>
       </div>`
     overlay.addEventListener("click", e => { if (e.target === overlay) overlay.remove() })
     document.body.appendChild(overlay)
+    overlay.querySelector("#overlay-close").addEventListener("click", () => overlay.remove())
+    overlay.querySelector("#overlay-close-btn").addEventListener("click", () => overlay.remove())
   })
 }
 
@@ -416,7 +450,7 @@ async function saveSettings() {
   const autoDetect = document.getElementById("auto-detect").checked
   const showFab = document.getElementById("show-fab").checked
   await chrome.storage.local.set({ serverUrl: url, autoDetect, showFab })
-  const btn = document.querySelector(".save-btn")
+  const btn = document.getElementById("save-settings-btn")
   const orig = btn.textContent
   btn.textContent = "✓ Saved!"
   setTimeout(() => { btn.textContent = orig }, 1800)
