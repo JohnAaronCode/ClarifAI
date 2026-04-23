@@ -256,9 +256,9 @@ function CredibilityProgressBar({ label, value, color }: { label: string; value:
 function SourceCredibilityCard({ result, verdict }: { result: ResultsDisplayProps["result"]; verdict: string }) {
   const rawCred = (result.source_credibility_detailed?.credibility_score ?? 0.5) * 100
   let credScore: number
-  if (verdict === "REAL") credScore = Math.max(70, Math.min(100, rawCred))
-  else if (verdict === "FAKE") credScore = Math.min(30, rawCred)
-  else credScore = Math.max(30, Math.min(50, rawCred))
+  if (verdict === "REAL") credScore = Math.max(65, Math.min(100, rawCred))
+  else if (verdict === "FAKE") credScore = Math.min(45, rawCred)
+  else credScore = Math.max(30, Math.min(75, rawCred))
 
   const sourceLabel = result.source_label || ""
   const hasSource = sourceLabel.toLowerCase().includes("verified") || sourceLabel.toLowerCase().includes("suggested") || (result.source_credibility || 0) > 0
@@ -292,9 +292,9 @@ function SourceCredibilityCard({ result, verdict }: { result: ResultsDisplayProp
 function ContentQualityCard({ result, verdict }: { result: ResultsDisplayProps["result"]; verdict: string }) {
   const rawContent = (result.content_quality_detailed?.overall_score ?? 0.5) * 100
   let contentScore: number
-  if (verdict === "REAL") contentScore = Math.max(70, Math.min(100, rawContent))
-  else if (verdict === "FAKE") contentScore = Math.min(40, rawContent)
-  else contentScore = Math.max(40, Math.min(60, rawContent))
+  if (verdict === "REAL") contentScore = Math.max(65, Math.min(100, rawContent))
+  else if (verdict === "FAKE") contentScore = Math.min(38, rawContent)
+  else contentScore = Math.max(35, Math.min(70, rawContent))
 
   const tier = getContentTier(contentScore, verdict)
   const colors = tierColors(tier)
@@ -419,9 +419,9 @@ export default function ResultsDisplay({ result, inputContent }: ResultsDisplayP
   const rawCred = (result.source_credibility_detailed?.credibility_score ?? 0.5) * 100
   const rawContent = (result.content_quality_detailed?.overall_score ?? 0.5) * 100
   let credScore: number, contentScore: number
-  if (result.verdict === "REAL") { credScore = Math.max(70, Math.min(100, rawCred)); contentScore = Math.max(70, Math.min(100, rawContent)) }
-  else if (result.verdict === "FAKE") { credScore = Math.min(30, rawCred); contentScore = Math.min(40, rawContent) }
-  else { credScore = Math.max(30, Math.min(50, rawCred)); contentScore = Math.max(40, Math.min(60, rawContent)) }
+  if (result.verdict === "REAL") { credScore = Math.max(65, Math.min(100, rawCred)); contentScore = Math.max(65, Math.min(100, rawContent)) }
+  else if (result.verdict === "FAKE") { credScore = Math.min(45, rawCred); contentScore = Math.min(38, rawContent) }
+  else { credScore = Math.max(30, Math.min(75, rawCred)); contentScore = Math.max(35, Math.min(70, rawContent)) }
 
   const sourceLabel = result.source_label || ""
   const hasSource = sourceLabel.toLowerCase().includes("verified") || sourceLabel.toLowerCase().includes("suggested") || (result.source_credibility || 0) > 0
@@ -522,9 +522,20 @@ function DynamicSourceLinks({ links, verdict, searchQuery, detectedTopics, analy
     }
   }
 
-  const topicLabel = detectedTopics && detectedTopics.length > 0
-    ? detectedTopics.slice(0, 2).map(t => t.charAt(0).toUpperCase() + t.slice(1)).join(" · ")
-    : null
+const topicLabel = detectedTopics && detectedTopics.length > 0
+  ? (() => {
+      const scope = detectedTopics.includes("national") ? "National"
+        : detectedTopics.includes("world") ? "International"
+        : null
+      const rest = detectedTopics
+        .filter(t => t !== "national" && t !== "world")
+        .slice(0, 1)
+        .map(t => t.charAt(0).toUpperCase() + t.slice(1))
+      return scope
+        ? [scope, ...rest].join(" · ")
+        : rest.join(" · ") || detectedTopics[0].charAt(0).toUpperCase() + detectedTopics[0].slice(1)
+    })()
+  : null
 
   const cardStyle = isReal
     ? "bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60"

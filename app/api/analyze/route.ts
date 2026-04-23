@@ -486,20 +486,22 @@ async function analyzeContentWithDualEngine(
     ensembleResult = await ensembleAnalysis(content, evidence, openaiApiKey || "", groqApiKey)
   }
 
-  if (ensembleResult?.ml_signals) {
+if (ensembleResult?.ml_signals) {
     verdict     = ensembleResult.primary_verdict as any
     confidence  = ensembleResult.confidence_score
     explanation = ensembleResult.ml_signals.verdict_explanation || ""
   } else {
+
+    const hasFactCheckBonus = bestFactCheck ? 0.15 : 0
     const rawScore =
-      sourceAnalysis.credibility * 0.35 +
-      credibilityPatterns.score  * 0.30 +
-      (1 - Math.max(0, sentimentAnalysis.emotionalScore - 0.3)) * 0.15 +
-      (1 - clickbaitScore) * 0.15 +
-      Math.min(content.length / 2000, 0.1) * 0.05
-    confidence = Math.round(Math.min(rawScore * 100, 99))
-    if (rawScore >= 0.72)      verdict = "REAL"
-    else if (rawScore <= 0.38) verdict = "FAKE"
+      sourceAnalysis.credibility * 0.40 +
+      credibilityPatterns.score  * 0.25 +
+      hasFactCheckBonus          * 1.00 +
+      (1 - Math.min(sentimentAnalysis.emotionalScore, 1)) * 0.12 +
+      (1 - clickbaitScore) * 0.08
+    confidence = Math.round(Math.min(rawScore * 100, 95))
+    if (rawScore >= 0.68)      verdict = "REAL"
+    else if (rawScore <= 0.35) verdict = "FAKE"
     else                       verdict = "UNVERIFIED"
     explanation = buildExplanation(verdict, {
       sourceCredibility: sourceAnalysis.credibility,
@@ -570,18 +572,23 @@ async function analyzeContentWithDualEngine(
   const sourceCredibility   = await analyzeSourceCredibility(content, type, sourceAnalysis.credibility, verdict)
   const contentQuality      = await analyzeContentQuality(content, verdict, confidence)
 
-  let adjustedSourceCred    = sourceCredibility.credibility_score
+  let adjustedSourceCred     = sourceCredibility.credibility_score
   let adjustedContentQuality = contentQuality.overall_score
+
   if (verdict === "REAL") {
-    adjustedSourceCred    = Math.max(0.7, Math.min(1, adjustedSourceCred))
-    adjustedContentQuality = Math.max(0.7, Math.min(1, adjustedContentQuality))
+    adjustedSourceCred     = Math.max(0.65, adjustedSourceCred)
+    adjustedContentQuality = Math.max(0.65, adjustedContentQuality)
   } else if (verdict === "FAKE") {
-    adjustedSourceCred    = Math.min(0.3, adjustedSourceCred)
-    adjustedContentQuality = Math.min(0.4, adjustedContentQuality)
-  } else if (verdict === "UNVERIFIED") {
-    adjustedSourceCred    = Math.max(0.3, Math.min(0.5, adjustedSourceCred))
-    adjustedContentQuality = Math.max(0.4, Math.min(0.6, adjustedContentQuality))
+
+    adjustedSourceCred     = Math.min(0.45, adjustedSourceCred)
+
+    adjustedContentQuality = Math.min(0.38, adjustedContentQuality)
+  } else {
+
+    adjustedSourceCred     = Math.max(0.30, Math.min(0.75, adjustedSourceCred))
+    adjustedContentQuality = Math.max(0.35, Math.min(0.70, adjustedContentQuality))
   }
+
   sourceCredibility.credibility_score = adjustedSourceCred
   contentQuality.overall_score        = adjustedContentQuality
 

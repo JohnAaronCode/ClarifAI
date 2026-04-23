@@ -46,6 +46,7 @@ interface VisitorData {
   total_analyses: number
   today: number
   today_date: string
+  [key: string]: number | string
 }
 
 const VERDICT_DISPLAY = {
@@ -121,29 +122,32 @@ function useVisitorCount() {
   const [loading, setLoading] = useState(true)
   const hasCounted = useRef(false)
 
-  const fetchData = async (method?: "POST") => {
+  const fetchData = async (method: "GET" | "POST" = "GET") => {
     try {
-      const res = method === "POST"
-        ? await fetch("/api/visitors", { method: "POST" })
-        : await fetch("/api/visitors")
-      if (res.ok) setData(await res.json())
-    } catch {}
+      const res = await fetch("/api/visitors", {
+        method,
+        cache: "no-store",
+      })
+      if (res.ok) {
+        const json = await res.json()
+        setData(json)
+      }
+    } catch (err) {
+      console.warn("[visitors] fetch error:", err)
+    }
   }
 
   useEffect(() => {
     const run = async () => {
-      if (!hasCounted.current) {
-        hasCounted.current = true
-        const alreadyCounted = sessionStorage.getItem("clarifai_counted")
-        await fetchData(alreadyCounted ? undefined : "POST")
-        if (!alreadyCounted) sessionStorage.setItem("clarifai_counted", "1")
-      }
+      if (hasCounted.current) return
+      hasCounted.current = true
+
+      await fetchData("POST")
       setLoading(false)
     }
     run()
 
-    // Poll every 30 seconds for live updates
-    const interval = setInterval(() => fetchData(), 30000)
+    const interval = setInterval(() => fetchData(), 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -176,9 +180,30 @@ function AnimatedCounter({ value, loading }: { value: number | undefined; loadin
 }
 
 const STAT_CONFIG = [
-  { key: "total_visitors" as keyof VisitorData, label: "Total Visitors", icon: Users, color: "text-teal-600 dark:text-teal-400", iconBg: "bg-teal-50 dark:bg-teal-900/30", border: "border-teal-100 dark:border-teal-900/40" },
-  { key: "today" as keyof VisitorData, label: "Today's Visitors", icon: TrendingUp, color: "text-sky-600 dark:text-sky-400", iconBg: "bg-sky-50 dark:bg-sky-900/30", border: "border-sky-100 dark:border-sky-900/40" },
-  { key: "total_analyses" as keyof VisitorData, label: "Analyses Done", icon: Activity, color: "text-violet-600 dark:text-violet-400", iconBg: "bg-violet-50 dark:bg-violet-900/30", border: "border-violet-100 dark:border-violet-900/40" },
+  {
+    key: "total_visitors" as keyof VisitorData,
+    label: "Total Visitors",
+    icon: Users,
+    color: "text-teal-600 dark:text-teal-400",
+    iconBg: "bg-teal-50 dark:bg-teal-900/30",
+    border: "border-teal-100 dark:border-teal-900/40",
+  },
+  {
+    key: "today" as keyof VisitorData,
+    label: "Today's Visitors",
+    icon: TrendingUp,
+    color: "text-sky-600 dark:text-sky-400",
+    iconBg: "bg-sky-50 dark:bg-sky-900/30",
+    border: "border-sky-100 dark:border-sky-900/40",
+  },
+  {
+    key: "total_analyses" as keyof VisitorData,
+    label: "Total Analyses",
+    icon: Activity,
+    color: "text-violet-600 dark:text-violet-400",
+    iconBg: "bg-violet-50 dark:bg-violet-900/30",
+    border: "border-violet-100 dark:border-violet-900/40",
+  },
 ]
 
 export default function DetectorPage() {

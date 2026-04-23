@@ -1,10 +1,10 @@
 {
-  "total_visitors": 19,
+  "total_visitors": 20,
   "today_visitors": 1,
-  "total_analyses": 71,
-  "today_date": "2026-04-21",
-  "updated_at": "2026-04-20T17:24:28.253Z",
+  "total_analyses": 75,
+  "today_date": "2026-04-24",
+  "updated_at": "2026-04-23T19:32:42.950Z",
   "sessions": {
-    "1c5949c3-199a-4080-b7f9-eeabdabcded7": 1776705868250
+    "dfbe4949-5ea7-4805-8674-1ab406d41c12": 1776969329198
   }
 }
