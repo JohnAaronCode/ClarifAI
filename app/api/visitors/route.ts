@@ -10,7 +10,7 @@ const KEYS = {
   totalAnalyses:  "clarifai:total_analyses",
   todayVisitors:  "clarifai:today_visitors",
   todayDate:      "clarifai:today_date",
-  sessions:       "clarifai:sessions", // Redis hash — sessionId -> lastActive timestamp
+  sessions:       "clarifai:sessions", 
 }
 
 // Get today's date in Philippine Time (UTC+8)
