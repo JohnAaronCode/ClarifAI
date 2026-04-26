@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { ensembleAnalysis } from "@/lib/ml-utils"
 import { analysisCache, factCheckCache, newsApiCache, makeCacheKey, makeQueryKey } from "@/lib/cache"
+import { detectBias, detectLanguage, generateArticleSummary } from "@/lib/bias-utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({
             verdict: "ERROR",
             confidence_score: 0,
-            explanation: "URL content is too short or empty. Please check if the URL contains an article.",
+            explanation: "This URL does not contain extractable article content. Try pasting the article text directly instead.",
           })
         }
       } catch (error) {
@@ -60,7 +61,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // ── Cache check ───────────────────────────────────────────────────────
     const cacheKey = makeCacheKey(processedContent, type)
     const cached = analysisCache.get(cacheKey)
     if (cached) {
@@ -77,15 +77,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ── Shared HTML entity decoder ────────────────────────────────────────────
 function decodeHTMLEntities(text: string): string {
   return text
     .replace(/<[^>]+>/g, "")
-    // Numeric decimal entities — covers WordPress curly quotes like &#8216; &#8217; &#8220; &#8221;
     .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
-    // Numeric hex entities like &#x2019;
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    // Named entities
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
@@ -103,14 +99,11 @@ function decodeHTMLEntities(text: string): string {
 }
 
 function extractTitleFromHTML(html: string): string {
-  // 1st priority: <h1> — most accurate headline on news sites
   const h1Match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
   if (h1Match) {
     const decoded = decodeHTMLEntities(h1Match[1])
     if (decoded.length > 10) return decoded
   }
-
-  // 2nd priority: og:title meta — complete headline without site-name suffix
   const ogTitleMatch =
     html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i)
@@ -118,13 +111,10 @@ function extractTitleFromHTML(html: string): string {
     const decoded = decodeHTMLEntities(ogTitleMatch[1])
     if (decoded.length > 10) return decoded
   }
-
-  // 3rd priority: <title> tag — strip site name suffix
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
   if (titleMatch) {
     return decodeHTMLEntities(titleMatch[1]).split(/\s[\|\-–—]\s/)[0].trim()
   }
-
   return ""
 }
 
@@ -140,7 +130,6 @@ function extractTextFromHTML(html: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ")
-    // Decode numeric entities in body text too
     .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/\s+/g, " ")
@@ -164,18 +153,11 @@ function detectMeaninglessContent(content: string): { isMeaningless: boolean; re
   let fillerCount = 0
   for (const word of words) { if (fillerWords.has(word)) fillerCount++ }
   if (fillerCount / words.length > 0.5) meaningfulnessScore -= 25
-  const spamPhrases = ['best', 'amazing', 'incredible', 'absolutely', 'definitely', 'certainly', 'extremely', 'very', 'really', 'so', 'most', 'must', 'should', 'would']
-  const lc = trimmed.toLowerCase()
-  let superlativeCount = 0
-  for (const p of spamPhrases) superlativeCount += (lc.match(new RegExp(p, 'g')) || []).length
-  if (superlativeCount > words.length * 0.15) meaningfulnessScore -= 20
   if ((trimmed.match(/([a-z])\1{2,}/g) || []).length > 5) meaningfulnessScore -= 30
   if ((trimmed.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{2,}/g) || []).length > 3) meaningfulnessScore -= 25
   const uppercase = (trimmed.match(/[A-Z]/g) || []).length
   const lowercase = (trimmed.match(/[a-z]/g) || []).length
   if (uppercase === 0 || lowercase === 0) meaningfulnessScore -= 15
-  const transitionWords = ['however', 'therefore', 'thus', 'meanwhile', 'furthermore', 'moreover', 'consequently', 'accordingly', 'subsequently', 'likewise', 'similarly', 'instead', 'otherwise', 'rather', 'namely', 'indeed', 'also', 'because']
-  if (transitionWords.filter(w => lc.includes(w)).length === 0 && words.length > 100) meaningfulnessScore -= 10
   if (new Set(words).size / words.length < 0.3) meaningfulnessScore -= 15
   meaningfulnessScore = Math.max(0, Math.min(100, meaningfulnessScore))
   if (meaningfulnessScore < 30) {
@@ -268,6 +250,10 @@ function extractContentKeywords(content: string, maxKeywords = 6): string {
     "each","every","either","neither","other","another","such","same","own",
     "its","our","your","his","her","their","my","we","you","he","she","they",
     "i","me","him","us","them","what","which","who","whom","whose",
+    // Filipino stopwords
+    "ang","ng","na","sa","at","ay","mga","para","kung","pero","hindi",
+    "ito","yan","yun","siya","sila","kami","tayo","kayo","ako","ikaw",
+    "dahil","kaya","ngunit","subalit","habang","kapag","kahit",
   ])
   const words = content
     .replace(/[^a-zA-Z0-9\s'-]/g, " ")
@@ -457,6 +443,16 @@ async function analyzeContentWithDualEngine(
   const credibilityPatterns = analyzeCredibilityPatterns(content)
   const sentimentAnalysis   = analyzeSentiment(content)
 
+  // ── NEW: Bias, Language & Summary ────────────────────────────────────
+  let analyzedDomainForBias: string | null = null
+  if (type === "url" && originalInput) {
+    try { analyzedDomainForBias = new URL(originalInput).hostname.replace("www.", "") } catch {}
+  }
+  const biasAnalysis    = detectBias(content, analyzedDomainForBias)
+  const languageResult  = detectLanguage(content)
+  const articleSummary  = generateArticleSummary(content)
+  // ─────────────────────────────────────────────────────────────────────
+
   const contentKeywords = extractContentKeywords(content, 6)
   const aiQuery    = await buildAISearchQuery(content, openaiApiKey, groqApiKey)
   const searchQuery = aiQuery || buildSearchQuery(content, claims)
@@ -486,12 +482,11 @@ async function analyzeContentWithDualEngine(
     ensembleResult = await ensembleAnalysis(content, evidence, openaiApiKey || "", groqApiKey)
   }
 
-if (ensembleResult?.ml_signals) {
+  if (ensembleResult?.ml_signals) {
     verdict     = ensembleResult.primary_verdict as any
     confidence  = ensembleResult.confidence_score
     explanation = ensembleResult.ml_signals.verdict_explanation || ""
   } else {
-
     const hasFactCheckBonus = bestFactCheck ? 0.15 : 0
     const rawScore =
       sourceAnalysis.credibility * 0.40 +
@@ -526,7 +521,7 @@ if (ensembleResult?.ml_signals) {
         search_url: ownSearchUrl,
         homepage_url: `https://${analyzedDomain}`,
       }
-    } catch { /* ignore */ }
+    } catch {}
   } else if (type === "text" && sourceAnalysis.source) {
     try {
       const parsed = new URL(sourceAnalysis.source)
@@ -542,7 +537,7 @@ if (ensembleResult?.ml_signals) {
           homepage_url: matchedSrc.url,
         }
       }
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   const relatedSources = await findRelatedTrustedSources(
@@ -579,12 +574,9 @@ if (ensembleResult?.ml_signals) {
     adjustedSourceCred     = Math.max(0.65, adjustedSourceCred)
     adjustedContentQuality = Math.max(0.65, adjustedContentQuality)
   } else if (verdict === "FAKE") {
-
     adjustedSourceCred     = Math.min(0.45, adjustedSourceCred)
-
     adjustedContentQuality = Math.min(0.38, adjustedContentQuality)
   } else {
-
     adjustedSourceCred     = Math.max(0.30, Math.min(0.75, adjustedSourceCred))
     adjustedContentQuality = Math.max(0.35, Math.min(0.70, adjustedContentQuality))
   }
@@ -618,6 +610,10 @@ if (ensembleResult?.ml_signals) {
     detected_topics: detectedTopics,
     analyzed_domain: analyzedDomain,
     article_title: articleTitle,
+    // ── NEW fields ───────────────────────────────────────────────────
+    bias_analysis: biasAnalysis,
+    language_detection: languageResult,
+    article_summary: articleSummary,
   }
 }
 
@@ -861,7 +857,7 @@ function analyzeSource(content: string, type: string, originalInput?: string) {
         const suggestions = selectRelevantSources(host, detectedTopics, 3, isPhilippinesContent)
         detectedSources.push(...suggestions.map((s) => ({ name: s.name, url: s.url })))
       }
-    } catch { /* ignore */ }
+    } catch {}
   } else {
     const mentionedSource = ALL_SOURCES.find((src) => text.includes(src.domain.split(".")[0]) || text.includes(src.name.toLowerCase()))
     if (mentionedSource) {
@@ -1014,26 +1010,11 @@ async function analyzeSourceCredibility(content: string, type: string, baseCredi
         const trusted = data.sources.map((s: any) => s.name.toLowerCase())
         if (trusted.some((src: string) => lower.includes(src))) { result.credibility_score += 0.1; result.reason.push("Trusted news outlet mentioned in text.") }
       }
-    } catch { /* skip */ }
+    } catch {}
   }
 
   const final = result.credibility_score
   result.credibility_label = final > 0.8 ? "Highly credible" : final > 0.6 ? "Credible" : final > 0.4 ? "Uncertain" : "Low credibility"
-
-  try {
-    const knownRight  = ["foxnews.com","breitbart.com","dailycaller.com"]
-    const knownLeft   = ["cnn.com","msnbc.com","huffpost.com"]
-    const knownCenter = ["reuters.com","apnews.com","bbc.com","nytimes.com"]
-    if (result.domain_authority && typeof result.domain_authority === "number" && result.domain_authority > 0) {
-      const domain = type === "url" ? (() => { try { return new URL(content).hostname.replace("www.", "") } catch { return "" } })() : ""
-      if (domain) {
-        if (knownRight.some((d) => domain.includes(d))) { result.bias_rating = "Right-leaning"; result.bias_indicators = ["Known right-leaning editorial stance"] }
-        else if (knownLeft.some((d) => domain.includes(d))) { result.bias_rating = "Left-leaning"; result.bias_indicators = ["Known left-leaning editorial stance"] }
-        else if (knownCenter.some((d) => domain.includes(d))) { result.bias_rating = "Neutral"; result.bias_indicators = ["Reputable news organization with neutral reporting standards"] }
-        else { result.bias_rating = "Unable to determine"; result.bias_indicators = ["Unknown source credibility"] }
-      } else { result.bias_rating = "Unable to determine"; result.bias_indicators = ["Source domain not provided"] }
-    } else { result.bias_rating = "Unable to determine"; result.bias_indicators = ["Insufficient source information available"] }
-  } catch { result.bias_rating = "Unable to determine"; result.bias_indicators = ["Error during bias assessment"] }
 
   if (verdict === "FAKE") { result.credibility_score = Math.min(0.3, result.credibility_score); result.credibility_label = "Low credibility" }
   else if (verdict === "REAL") { result.credibility_score = Math.max(0.7, result.credibility_score); result.credibility_label = "High credibility" }
