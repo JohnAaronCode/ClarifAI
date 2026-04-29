@@ -225,9 +225,19 @@ const handleAnalyze = async (content: string, type: "text" | "url") => {
 
     // Check history for previous analysis
     try {
-      const history: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+      const raw: unknown[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+
+      const history: HistoryItem[] = raw.filter((i): i is HistoryItem =>
+        typeof i === "object" && i !== null &&
+        typeof (i as any).id === "string" &&
+        typeof (i as any).full_content === "string" &&
+        typeof (i as any).created_at === "string" &&
+        ["REAL", "FAKE", "UNVERIFIED"].includes((i as any).verdict)
+      )
+
       const contentKey = makeContentKey(content)
       const existing = history.find(item => makeContentKey(item.full_content) === contentKey)
+
       if (existing) setPreviousResult(existing)
     } catch {}
 
@@ -243,16 +253,28 @@ const handleAnalyze = async (content: string, type: "text" | "url") => {
       if (data.verdict !== "ERROR") {
         try { await fetch("/api/visitors", { method: "PATCH" }) } catch {}
         try {
-          const history: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+          const raw: unknown[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+
+          const history: HistoryItem[] = raw.filter((i): i is HistoryItem =>
+            typeof i === "object" && i !== null &&
+            typeof (i as any).id === "string" &&
+            typeof (i as any).full_content === "string" &&
+            typeof (i as any).created_at === "string" &&
+            ["REAL", "FAKE", "UNVERIFIED"].includes((i as any).verdict)
+          )
+
           const contentKey = makeContentKey(content)
           const deduplicated = history.filter(item => makeContentKey(item.full_content) !== contentKey)
+
           const meta = extractArticleMeta(content, type)
-          // Decode entities from API title to prevent &#8217; etc. from being saved to localStorage
+
           const rawApiTitle = data.article_title
             || (data.search_query
               ? data.search_query.replace(/\b\w/g, (c: string) => c.toUpperCase()).trim()
               : undefined)
+
           const apiTitle = rawApiTitle ? decodeEntities(rawApiTitle) : undefined
+
           const newEntry: HistoryItem = {
             id: Date.now().toString(),
             input_type: type,
@@ -269,8 +291,10 @@ const handleAnalyze = async (content: string, type: "text" | "url") => {
             fact_check_results: data.fact_check_results,
             created_at: new Date().toISOString(),
           }
+
           deduplicated.unshift(newEntry)
           localStorage.setItem("analysisHistory", JSON.stringify(deduplicated.slice(0, 50)))
+
         } catch (historyError) {
           console.error("History save error:", historyError)
         }
@@ -408,8 +432,15 @@ function HistoryTab({ onReanalyze, onSwitchToDetector }: {
   }
 
   useEffect(() => {
-    const saved: HistoryItem[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
-    const valid = saved.filter(i => i.verdict === "REAL" || i.verdict === "FAKE" || i.verdict === "UNVERIFIED")
+  const raw: unknown[] = JSON.parse(localStorage.getItem("analysisHistory") || "[]")
+
+  const valid: HistoryItem[] = raw.filter((i): i is HistoryItem =>
+    typeof i === "object" && i !== null &&
+    typeof (i as any).id === "string" &&
+    typeof (i as any).full_content === "string" &&
+    typeof (i as any).created_at === "string" &&
+    ["REAL", "FAKE", "UNVERIFIED"].includes((i as any).verdict)
+  )
     setHistory(valid); setFiltered(valid); setLoading(false)
   }, [])
 

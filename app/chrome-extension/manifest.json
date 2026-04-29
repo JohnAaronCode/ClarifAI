@@ -2,21 +2,21 @@
   "manifest_version": 3,
   "name": "ClarifAI - News Credibility Analyzer",
   "version": "1.0.0",
-  "description": "Analyze news credibility powered by AI",
+  "description": "Instantly check news credibility powered by AI. Supports Philippine and international news sources.",
   "permissions": [
     "activeTab",
     "storage",
     "contextMenus"
   ],
   "host_permissions": [
-    "https://your-clarifai-app.vercel.app/*",
+    "https://clarif-ai-beta.vercel.app/*",
     "<all_urls>"
   ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
       "128": "icons/icon128.png"
     }
   },
@@ -31,8 +31,8 @@
     "service_worker": "background.js"
   },
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
     "128": "icons/icon128.png"
   }
 }

@@ -1,7 +1,3 @@
-// lib/cache.ts
-// Simple in-memory TTL cache — prevents duplicate API calls for same content
-// Resets on server restart (acceptable for Next.js serverless)
-
 interface CacheEntry<T> {
   value: T
   expiresAt: number

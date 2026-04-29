@@ -3,10 +3,7 @@
 import type React from "react"
 import { useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Loader2, X, FileText, Link2, ScanSearch, Sparkles } from "lucide-react"
+import { Loader2, X, FileText, Link2, ScanSearch } from "lucide-react"
 
 interface DetectorFormProps {
   onAnalyze: (content: string, type: "text" | "url") => void
@@ -23,26 +20,40 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
 
   function looksLikeUrl(text: string): boolean {
     const trimmed = text.trim()
-    return /^https?:\/\//i.test(trimmed) || /^www\./i.test(trimmed) || /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed)
+    return (
+      /^https?:\/\//i.test(trimmed) ||
+      /^www\./i.test(trimmed) ||
+      /^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/|$)/.test(trimmed)
+    )
   }
 
   const validateArticleInput = (text: string): { isValid: boolean; error: string } => {
     const trimmed = text.trim()
     if (!trimmed) return { isValid: false, error: "" }
-    if (looksLikeUrl(trimmed)) return { isValid: false, error: "This looks like a URL. Please switch to the URL tab." }
-    if (trimmed.length < 30) return { isValid: false, error: "Content is too short. Please paste a full article." }
+    if (looksLikeUrl(trimmed))
+      return { isValid: false, error: "This looks like a URL. Please switch to the URL tab." }
+    if (trimmed.length < 30)
+      return { isValid: false, error: "Content is too short. Please paste a full article." }
     const wordCount = trimmed.split(/\s+/).filter(Boolean).length
-    if (wordCount < 5) return { isValid: false, error: "Please paste a full article or more text." }
+    if (wordCount < 5)
+      return { isValid: false, error: "Please paste a full article or more text." }
+
+    // FIX: Lowered from 0.4 to 0.25 to match backend threshold.
+    // Legitimate articles about a specific topic (politics, court cases, etc.)
+    // naturally repeat key terms and would be incorrectly rejected at 0.4.
     const words = trimmed.toLowerCase().split(/\s+/).filter(Boolean)
     const uniqueRatio = new Set(words).size / words.length
-    if (uniqueRatio < 0.4) return { isValid: false, error: "Content seems repetitive. Please provide a real article." }
+    if (uniqueRatio < 0.25)
+      return { isValid: false, error: "Content seems repetitive. Please provide a real article." }
+
     return { isValid: true, error: "" }
   }
 
   const validateUrlInput = (url: string): { isValid: boolean; error: string } => {
     const trimmed = url.trim()
     if (!trimmed) return { isValid: false, error: "" }
-    if (!looksLikeUrl(trimmed)) return { isValid: false, error: "This looks like article text. Please switch to the Article tab." }
+    if (!looksLikeUrl(trimmed))
+      return { isValid: false, error: "This looks like article text. Please switch to the Article tab." }
     try {
       const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
       new URL(withScheme)
@@ -83,7 +94,7 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
   }
 
   const handleClearArticle = () => { setArticleText(""); setArticleError(""); onClearResult() }
-  const handleClearUrl = () => { setUrlInput(""); setUrlError(""); onClearResult() }
+  const handleClearUrl    = () => { setUrlInput("");    setUrlError("");    onClearResult() }
 
   return (
     <>
@@ -167,12 +178,8 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
         .form-textarea.error, .form-input.error {
           border-color: #f87171;
         }
-        .form-textarea::placeholder, .form-input::placeholder {
-          color: #94a3b8;
-        }
-        .dark .form-textarea::placeholder, .dark .form-input::placeholder {
-          color: #475569;
-        }
+        .form-textarea::placeholder, .form-input::placeholder { color: #94a3b8; }
+        .dark .form-textarea::placeholder, .dark .form-input::placeholder { color: #475569; }
 
         .error-msg {
           display: flex;
@@ -249,15 +256,9 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
               disabled={loading || !articleText.trim()}
             >
               {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Analyzing...
-                </>
+                <><Loader2 className="w-4 h-4 animate-spin" />Analyzing...</>
               ) : (
-                <>
-                  <ScanSearch className="w-4 h-4" />
-                  Analyze
-                </>
+                <><ScanSearch className="w-4 h-4" />Analyze</>
               )}
             </button>
           </TabsContent>
@@ -300,15 +301,9 @@ export default function DetectorForm({ onAnalyze, onClearResult, loading }: Dete
               disabled={loading || !urlInput.trim()}
             >
               {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Analyzing...
-                </>
+                <><Loader2 className="w-4 h-4 animate-spin" />Analyzing...</>
               ) : (
-                <>
-                  <ScanSearch className="w-4 h-4" />
-                  Analyze
-                </>
+                <><ScanSearch className="w-4 h-4" />Analyze</>
               )}
             </button>
           </TabsContent>
